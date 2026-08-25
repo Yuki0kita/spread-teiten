@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "spread-teiten",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-06-01",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "spread_teiten",
+      "database_id": "f5d048f5-14e9-413a-b8ca-6142355cac58"
+    }
+  ],
+  // スプレッドは秒単位で動く。GitHub Actionsの5分では粗すぎるため、
+  // 1分間隔で回せるCloudflareのCronを使っている。
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
+  "vars": {
+    "SITE_URL": "https://spread-teiten.family-camera-yuki.workers.dev"
+  },
+  "observability": {
+    "enabled": true
+  }
+}

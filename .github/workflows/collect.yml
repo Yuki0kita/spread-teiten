@@ -1,0 +1,51 @@
+name: collect spreads
+
+on:
+  workflow_dispatch:
+  schedule:
+    # GitHub Actionsの最短が5分。毎時00分付近は混んで遅れるため2分ずらしている。
+    # CloudflareのCron Triggerが発火しないため、こちらが実質の駆動役になっている。
+    - cron: '2,7,12,17,22,27,32,37,42,47,52,57 * * * *'
+
+concurrency:
+  group: spread-teiten-collect
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Collect one observation
+        env:
+          COLLECT_TOKEN: ${{ secrets.COLLECT_TOKEN }}
+          SITE_URL: https://spread-teiten.family-camera-yuki.workers.dev
+        run: |
+          if [ -z "$COLLECT_TOKEN" ]; then
+            echo "COLLECT_TOKEN が未設定です。リポジトリのSecretsに登録してください。" >&2
+            exit 1
+          fi
+          # 失敗を握りつぶさない。取得できた取引所の数まで見て、0ならワークフローを失敗させる。
+          response=$(curl -sS -X POST \
+            -H "Authorization: Bearer $COLLECT_TOKEN" \
+            -w '\n%{http_code}' \
+            "$SITE_URL/internal/collect")
+          body=$(printf '%s' "$response" | sed '$d')
+          status=$(printf '%s' "$response" | tail -n1)
+
+          echo "HTTP $status"
+          echo "$body"
+
+          if [ "$status" != "200" ]; then
+            echo "収集エンドポイントが $status を返しました。" >&2
+            exit 1
+          fi
+          # skipped は同じ分がすでに記録済みという意味なので、失敗ではない。
+          if printf '%s' "$body" | grep -q '"skipped":true'; then
+            echo "この分はすでに記録済みのため取得を省きました。"
+            exit 0
+          fi
+          if printf '%s' "$body" | grep -q '"collected":0'; then
+            echo "4取引所すべてから取得できませんでした。" >&2
+            exit 1
+          fi
