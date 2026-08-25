@@ -30,6 +30,8 @@ const percent = (bps) => {
 
 const form = document.querySelector('.amount');
 const input = document.getElementById('amount');
+// 銘柄はサーバーが出したHTMLから読む。JS側に銘柄の一覧を持たせない。
+const PAIR = (document.getElementById('chart') || {}).dataset?.pair || 'btc';
 
 if (form && input) {
   let timer = null;
@@ -39,12 +41,16 @@ if (form && input) {
     if (!Number.isFinite(amount) || amount <= 0) return;
 
     try {
-      const response = await fetch(`/api/latest.json?amount=${amount}`, { cache: 'no-cache' });
+      const response = await fetch(`/api/latest.json?pair=${PAIR}&amount=${amount}`, {
+        cache: 'no-cache',
+      });
       if (!response.ok) return;
       const data = await response.json();
       applyAmount(data);
       // 再読み込みなしでもURLは共有できる状態にしておく。
-      history.replaceState(null, '', `/?amount=${amount}`);
+      const url = new URL(location.href);
+      url.searchParams.set('amount', String(amount));
+      history.replaceState(null, '', url);
     } catch {
       // 取得に失敗したらサーバー側で計算された表示のまま残す。
     }
@@ -77,7 +83,7 @@ function applyAmount(data) {
 const chart = document.getElementById('chart');
 
 if (chart) {
-  fetch('/api/history.json?hours=24', { cache: 'no-cache' })
+  fetch(`/api/history.json?pair=${PAIR}&hours=24`, { cache: 'no-cache' })
     .then((response) => {
       if (!response.ok) throw new Error('取得に失敗しました');
       return response.json();
@@ -88,7 +94,13 @@ if (chart) {
       // 公開直後は必ずこの状態を通るので、素直に「まだ足りない」と書く。
       const spans = new Set((data.points || []).map((p) => p.t));
       if (series.size === 0 || spans.size < 2) {
-        chart.innerHTML = `<p class="chart__fallback">推移を描くにはあと少し観測が必要です（いま ${spans.size} 点。10分ごとに1点増えます）。</p>`;
+        // 文言はサーバーが言語ごとに出したものを使う。JS側に日本語を持たせない。
+        const template = chart.dataset.msgNotenough || '';
+        chart.textContent = '';
+        const note = document.createElement('p');
+        note.className = 'chart__fallback';
+        note.textContent = template.replace(/\d+/, String(spans.size));
+        chart.append(note);
         chart.removeAttribute('data-loading');
         return;
       }
@@ -97,7 +109,11 @@ if (chart) {
       chart.removeAttribute('data-loading');
     })
     .catch(() => {
-      chart.innerHTML = '<p class="chart__error">推移グラフを読み込めませんでした。</p>';
+      chart.textContent = '';
+      const note = document.createElement('p');
+      note.className = 'chart__error';
+      note.textContent = chart.dataset.msgFailed || '';
+      chart.append(note);
     });
 }
 

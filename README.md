@@ -6,9 +6,27 @@
 
 > この金額を、いま買って、すぐ売り戻したら、どこでいくら消えるか。
 
-- 画面: `/`
-- データ: `/api/latest.json` `/api/history.json` `/api/daily.json`
+- 画面: `/{lang}/{pair}/` と `/{lang}/{pair}/{YYYY-MM-DD}/`
+- データ: `/api/latest.json` `/api/history.json` `/api/daily.json`（いずれも `?pair=btc|eth|xrp`）
 - 実測ロジック: [src/spread.ts](src/spread.ts)
+
+## ページの構成
+
+```text
+/                          → ブラウザの言語を見て /ja/ か /en/ へ
+/{lang}/                   銘柄の一覧
+/{lang}/{pair}/            その銘柄の現在値と24時間の推移
+/{lang}/{pair}/{date}/     その日の記録
+```
+
+`lang` は `ja` `en`、`pair` は `btc` `eth` `xrp`。
+
+日別ページは**記録が貯まるだけ自動で増える**。手を動かさずにページが増えるのはここだけなので、
+日付の前後リンクと `recentDays` の一覧を必ず置いてクロールの導線を切らさない。
+記録の無い日付は404を返す。中身の無いURLを生やすとサイト全体の評価を落とすため。
+
+言語はパスに置く。`?lang=ja` のようなパラメータ方式は検索エンジンが別ページとして
+扱いにくいため使わない。全ページに `hreflang`（ja / en / x-default）と `canonical` を出している。
 
 ## なぜ作ったか
 
@@ -69,12 +87,17 @@ Workers + Hono（SSR）→ 画面とJSON
 
 いずれも認証不要の公開APIで、板の最良気配を返す。
 
-| 取引所 | エンドポイント |
-|---|---|
-| GMOコイン | `https://api.coin.z.com/public/v1/ticker?symbol=BTC` |
-| bitbank | `https://public.bitbank.cc/btc_jpy/ticker` |
-| bitFlyer | `https://api.bitflyer.com/v1/ticker?product_code=BTC_JPY` |
-| Coincheck | `https://coincheck.com/api/ticker` |
+| 取引所 | エンドポイント | 銘柄の指定 |
+|---|---|---|
+| GMOコイン | `https://api.coin.z.com/public/v1/ticker` | `?symbol=BTC` |
+| bitbank | `https://public.bitbank.cc/{pair}/ticker` | `btc_jpy` |
+| bitFlyer | `https://api.bitflyer.com/v1/ticker` | `?product_code=BTC_JPY` |
+| Coincheck | `https://coincheck.com/api/ticker` | `?pair=btc_jpy` |
+
+扱う銘柄は**4社すべてが板を公開しているもの**に限っている（BTC・ETH・XRP）。
+2社しか対応していない銘柄を並べても比較として意味が薄い。
+増やすときは [src/pairs.ts](src/pairs.ts) に足す前に、必ず全社のエンドポイントを実際に叩いて確かめる。
+bitFlyerは未対応の銘柄に `{"status":-100,"error_message":"Invalid product"}` を返す。
 
 bitbankだけ名前が直感と逆で、`sell` が売り注文の最安値（= 買う値段 = ask）、
 `buy` が買い注文の最高値（= 売る値段 = bid）。取り違えると `ask < bid` になって全データが捨てられるため、
@@ -203,7 +226,7 @@ npm run typecheck
 - **最良気配だけを見ている**。大きな金額を成行で入れると板を食って実効価格はもっと悪くなる。
   表示している往復コストは「板の一番上で約定できたら」という最良ケース
 - **取得に失敗した瞬間は欠測になる**。隠さず `fetch_errors` に残し、`/api/errors.json` で見られるようにしてある
-- **BTC/JPYのみ**。他の銘柄はCoincheckの公開APIが板の気配を返さないため、対応するなら取引所を絞る必要がある
+- **BTC・ETH・XRPのみ**。LTCやSOLはGMOとbitbankにはあるがbitFlyerに無いため、4社比較にならない
 
 ## 収益化について
 
@@ -218,10 +241,10 @@ npm run typecheck
 
 作る前に増やさない。まずデータを貯めて、アクセスと反応を見てから決める。
 
-- **Phase 2**: 銘柄を増やす（ETH・XRP。Coincheckは対象外にして3取引所で始める）
-- **Phase 3**: 「暴落した日にどこが何倍に開いたか」を日次データから出す。実測でしか書けない記事になる
-- **Phase 4**: 取引手数料を加えた実効コスト。公表値を持ち込むことになるので、
-  実測値と混ざらないよう表示を分ける
+- **取引所別ページ**（`/{lang}/venues/{venue}/`）。銘柄×取引所でさらにページが増える
+- 「暴落した日にどこが何倍に開いたか」を日次データから出す。実測でしか書けない記事になる
+- 取引手数料を加えた実効コスト。公表値を持ち込むことになるので、実測値と混ざらないよう表示を分ける
+- 被リンク。中身が増えてからでないと効かないので、日別ページが貯まってから
 
 ## 出どころ
 

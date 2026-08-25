@@ -9,8 +9,16 @@
  * 同じ分に何度呼ばれても結果は変わらない（tsを分単位に丸めた
  * INSERT OR REPLACE なので、行が増えずに上書きされる）。
  */
-import { fetchAll } from './venues.ts';
-import { insertErrors, insertTicks, pruneTicks, refreshBucket, refreshDaily } from './store.ts';
+import { PAIR_IDS, type PairId } from './pairs.ts';
+import { fetchPair } from './venues.ts';
+import {
+  hasTicksAt,
+  insertErrors,
+  insertTicks,
+  pruneTicks,
+  refreshBucket,
+  refreshDaily,
+} from './store.ts';
 
 export type CollectResult = {
   ts: number;
@@ -21,50 +29,72 @@ export type CollectResult = {
 };
 
 /**
- * 4取引所を同時に取って記録する。
+ * 全銘柄について、4取引所を同時に取って記録する。
  *
- * 同じ分ぶんが既にあるなら何もしない。
- * このガードが無いと、収集トークンが漏れたときに、
- * このWorkerを踏み台にして取引所のAPIを好きなだけ叩けてしまう。
- * 通常の5分間隔の呼び出しは毎回ちがう分になるので、ここで止まることはない。
+ * 銘柄どうしは並列にしない。同時に12本の外部リクエストを投げると、
+ * 取引所から見て一気に負荷が上がるため、銘柄は順番に処理する。
+ * 1銘柄の中の4取引所だけ並列にする（同じ瞬間の値であることが比較の前提なので）。
  *
  * @param atMs 観測時刻（ミリ秒）。分単位に丸めて全取引所で同じtsにそろえる。
  */
 export async function collectOnce(db: D1Database, atMs: number): Promise<CollectResult> {
   const ts = Math.floor(atMs / 1000 / 60) * 60;
 
-  const existing = await db
-    .prepare('SELECT COUNT(*) AS c FROM ticks WHERE ts = ?1')
-    .bind(ts)
-    .first<{ c: number }>();
-  if ((existing?.c ?? 0) > 0) {
+  // 同じ分ぶんが既にあるなら何もしない。
+  // このガードが無いと、収集トークンが漏れたときに、このWorkerを踏み台にして
+  // 取引所のAPIを好きなだけ叩けてしまう。通常の呼び出しは毎回ちがう分になる。
+  if (await hasTicksAt(db, PAIR_IDS[0] as PairId, ts)) {
     return { ts, collected: 0, failed: [], skipped: true };
   }
 
-  const { quotes, errors } = await fetchAll();
+  let collected = 0;
+  const failed: string[] = [];
 
-  await insertTicks(db, ts, quotes);
-  await insertErrors(db, ts, errors);
+  for (const pair of PAIR_IDS) {
+    const { quotes, errors } = await fetchPair(pair);
 
-  if (quotes.length > 0) {
-    await refreshBucket(db, ts);
+    await insertTicks(db, pair, ts, quotes);
+    await insertErrors(db, pair, ts, errors);
+    if (quotes.length > 0) {
+      await refreshBucket(db, pair, ts);
+    }
+
+    collected += quotes.length;
+    for (const error of errors) failed.push(`${pair}/${error.venue}`);
   }
 
+  await rollUp(db, ts);
+  return { ts, collected, failed };
+}
+
+/**
+ * 重い集計をまとめて回す。毎回やると読み取り量が跳ね上がるので間引く。
+ *
+ * 判定の窓を広めに取っているのは、外部スケジューラの実行時刻がずれるため。
+ * 「ちょうど何分」で判定すると、数分の遅延でその時間ぶんの集計を丸ごと落とす。
+ * 集計はどれも上書き（UPSERT）なので、多めに回っても壊れない。
+ */
+async function rollUp(db: D1Database, ts: number): Promise<void> {
   const jst = new Date((ts + 9 * 3600) * 1000);
   const minute = jst.getUTCMinutes();
   const hour = jst.getUTCHours();
 
-  // 日次集計は1時間に1回で足りる。毎回やると10分足を24時間ぶん読むことになる。
-  if (minute % 60 === 3) {
-    await refreshDaily(db, ts);
-  }
-  // 日付が変わった直後に前日ぶんを確定させ、古い生データを捨てる。
-  if (hour === 0 && minute < 10) {
-    await refreshDaily(db, ts - 3600);
-    await pruneTicks(db, ts);
+  // その日ぶんの日次集計。毎時0〜9分の間に来た回で作り直す。
+  const hourly = minute < 10;
+  // 前日ぶんの確定。0時台に来た回はすべてやる。ここを取りこぼすと
+  // 前日のページが未完成のまま残り、二度と直らない。
+  const closeYesterday = hour === 0;
+  // 生データの削除。落としても翌日やり直せるので窓は狭くてよい。
+  const prune = hour === 4 && minute < 10;
+
+  if (!hourly && !closeYesterday && !prune) return;
+
+  for (const pair of PAIR_IDS) {
+    if (hourly || closeYesterday) await refreshDaily(db, pair, ts);
+    if (closeYesterday) await refreshDaily(db, pair, ts - 3600);
   }
 
-  return { ts, collected: quotes.length, failed: errors.map((e) => e.venue) };
+  if (prune) await pruneTicks(db, ts);
 }
 
 /**

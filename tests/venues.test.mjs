@@ -1,12 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  VENUES,
   VenueError,
   parseBitbank,
   parseBitflyer,
   parseCoincheck,
   parseGmo,
 } from '../src/venues.ts';
+import { PAIR_IDS } from '../src/pairs.ts';
 import { isPlausible } from '../src/spread.ts';
 
 // 2026-08-25 14:10 JST に各取引所から実際に返ってきたレスポンス。
@@ -119,4 +121,31 @@ test('どのパーサーも壊れたレスポンスで例外にする', () => {
 test('数値として読めない気配値は例外', () => {
   assert.throws(() => parseCoincheck({ bid: 'あ', ask: 100 }), VenueError);
   assert.throws(() => parseBitflyer({ best_bid: null, best_ask: 100 }), VenueError);
+});
+
+
+test('すべての取引所が、すべての銘柄のURLを組み立てられる', () => {
+  for (const venue of VENUES) {
+    for (const pair of PAIR_IDS) {
+      const url = venue.url(pair);
+      assert.ok(url.startsWith('https://'), `${venue.id}/${pair} がhttpsでない`);
+      assert.doesNotMatch(url, /undefined/, `${venue.id}/${pair} のURLに undefined が入っている`);
+    }
+  }
+});
+
+test('銘柄ごとにURLが変わる（取り違えて同じ値を記録しない）', () => {
+  for (const venue of VENUES) {
+    const urls = new Set(PAIR_IDS.map((pair) => venue.url(pair)));
+    assert.equal(urls.size, PAIR_IDS.length, `${venue.id} が銘柄ごとに違うURLを返していない`);
+  }
+});
+
+test('parseBitflyer: 存在しない銘柄のエラーを見逃さない', () => {
+  // 対応していない銘柄では {"status":-100,"error_message":"Invalid product"} が返る。
+  // これを素通しすると best_bid が無いまま進んでしまう。
+  assert.throws(
+    () => parseBitflyer({ status: -100, error_message: 'Invalid product', data: null }),
+    VenueError,
+  );
 });

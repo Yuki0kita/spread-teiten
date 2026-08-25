@@ -3,9 +3,20 @@
  *
  * 数字はサーバー側で埋めて返す。開いた瞬間に結論が見えている状態を優先し、
  * JavaScriptはグラフの描画にしか使わない（JSを切っても比較は読める）。
+ *
+ * ページは3種類だけ。
+ *   /{lang}/                    銘柄の一覧
+ *   /{lang}/{pair}/             その銘柄の現在値と24時間の推移
+ *   /{lang}/{pair}/{YYYY-MM-DD}/ その日の記録
+ *
+ * 日別ページはデータが貯まるほど自動で増える。手を動かさずにページが増えるのは
+ * ここだけなので、日付の前後リンクを必ず置いてクロールの導線を切らさない。
  */
-import type { Ranked } from './spread.ts';
+import { costFromBps, type Ranked } from './spread.ts';
+import { DEFAULT_LOCALE, LOCALES, otherLocale, pairName, t, type Locale } from './i18n.ts';
+import { PAIRS, type Pair, type PairId } from './pairs.ts';
 import { VENUE_LABEL } from './venues.ts';
+import type { DailyRow } from './store.ts';
 
 export const DEFAULT_AMOUNT_YEN = 100_000;
 export const MIN_AMOUNT_YEN = 1_000;
@@ -14,28 +25,24 @@ export const MAX_AMOUNT_YEN = 100_000_000;
 /**
  * 観測がこれ以上止まったら、古い値であることを画面に出す。
  *
- * 取得は5分ごとだが、GitHub Actionsの定期実行は数分ずれることがある。
+ * 取得は5分ごとだが、外部スケジューラの定期実行は数分ずれることがある。
  * 通常のずれで「止まっています」と出すと文言が意味を持たなくなるので、
  * 実際の間隔の3倍以上あいたときだけ言う。
  */
 export const STALE_AFTER_SECONDS = 1200;
 
-export type PageData = {
-  amountYen: number;
-  ranked: Ranked[];
-  gapYen: number;
-  observedAt: number | null;
-  now: number;
-  assetVersion: string;
-  siteUrl: string;
-};
+export function homePath(locale: Locale): string {
+  return `/${locale}/`;
+}
 
-/**
- * 観測が止まっているかどうか。
- *
- * 古い値を黙って新しい顔で出すのが、このサイトでいちばんやってはいけないこと。
- * Cronが落ちても画面は普通に表示されてしまうので、鮮度は必ず自分で名乗る。
- */
+export function pairPath(locale: Locale, pair: PairId): string {
+  return `/${locale}/${pair}/`;
+}
+
+export function dayPath(locale: Locale, pair: PairId, day: string): string {
+  return `/${locale}/${pair}/${day}/`;
+}
+
 export function isStale(observedAt: number | null, now: number): boolean {
   if (observedAt === null) return false;
   return now - observedAt > STALE_AFTER_SECONDS;
@@ -47,85 +54,234 @@ export function clampAmount(raw: string | undefined): number {
   return Math.min(MAX_AMOUNT_YEN, Math.max(MIN_AMOUNT_YEN, Math.round(parsed)));
 }
 
-export function renderPage(data: PageData): string {
-  const { amountYen, ranked, gapYen, observedAt, now } = data;
-  const stale = isStale(observedAt, now);
-  const title = 'スプレッド定点';
-  const description =
-    '国内の暗号資産取引所のビットコインのスプレッドを5分ごとに実測して記録しています。同じ金額を買って売り戻したときに消える金額を、実測値で比べられます。';
+type LayoutOptions = {
+  locale: Locale;
+  siteUrl: string;
+  assetVersion: string;
+  title: string;
+  description: string;
+  /** 言語ごとのパス。hreflangとcanonicalを作るのに使う。 */
+  pathFor: (locale: Locale) => string;
+  body: string;
+  noindex?: boolean;
+  withScript?: boolean;
+};
+
+function layout(options: LayoutOptions): string {
+  const { locale, siteUrl, assetVersion, pathFor } = options;
+  const canonical = `${siteUrl}${pathFor(locale)}`;
+  const messages = t(locale);
+
+  const alternates = LOCALES.map(
+    (other) =>
+      `<link rel="alternate" hreflang="${other}" href="${esc(siteUrl + pathFor(other))}">`,
+  ).join('\n');
 
   return `<!DOCTYPE html>
-<html lang="ja">
+<html lang="${locale}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>${esc(title)}｜ビットコインのスプレッドを実測して記録</title>
-<meta name="description" content="${esc(description)}">
-<link rel="canonical" href="${esc(data.siteUrl)}/">
+${options.noindex ? '<meta name="robots" content="noindex">' : ''}
+<title>${esc(options.title)}</title>
+<meta name="description" content="${esc(options.description)}">
+<link rel="canonical" href="${esc(canonical)}">
+${alternates}
+<link rel="alternate" hreflang="x-default" href="${esc(siteUrl + pathFor(DEFAULT_LOCALE))}">
 <meta property="og:type" content="website">
-<meta property="og:title" content="${esc(title)}">
-<meta property="og:description" content="${esc(description)}">
-<meta property="og:url" content="${esc(data.siteUrl)}/">
-<meta property="og:image" content="${esc(data.siteUrl)}/og.png">
+<meta property="og:title" content="${esc(options.title)}">
+<meta property="og:description" content="${esc(options.description)}">
+<meta property="og:url" content="${esc(canonical)}">
+<meta property="og:image" content="${esc(siteUrl)}/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:site_name" content="${esc(title)}">
-<meta property="og:locale" content="ja_JP">
+<meta property="og:site_name" content="${esc(messages.siteName)}">
+<meta property="og:locale" content="${locale === 'ja' ? 'ja_JP' : 'en_US'}">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%232f4f7f'/><rect x='20' y='36' width='60' height='6' rx='3' fill='white'/><rect x='20' y='58' width='60' height='6' rx='3' fill='white' opacity='.55'/></svg>">
-<link rel="stylesheet" href="/style.css?v=${esc(data.assetVersion)}">
+<link rel="stylesheet" href="/style.css?v=${esc(assetVersion)}">
 </head>
 <body>
-<header class="head">
-  <h1>スプレッド定点</h1>
-  <p class="head__meta">${observedAt ? `${esc(formatTime(observedAt))} 実測` : '観測データがまだありません'}</p>
-</header>
-
-<main>
-  ${stale ? renderStaleNotice(observedAt as number, now) : ''}
-  <section class="lede">
-    <form class="amount" method="get" action="/">
-      <label for="amount">金額</label>
-      <input id="amount" name="amount" type="text" inputmode="numeric" value="${amountYen.toLocaleString('ja-JP')}" autocomplete="off">
-      <span class="amount__unit">円</span>
-      <button type="submit">計算</button>
-    </form>
-    <p class="lede__text">この金額のビットコインをいま買って、すぐ売り戻すと消える金額です。</p>
-  </section>
-
-  ${ranked.length === 0 ? renderEmpty() : renderRanking(ranked, gapYen)}
-
-  <section class="section">
-    <h2 class="section__title">24時間のスプレッド推移</h2>
-    <div id="chart" class="chart" data-loading="1">
-      <p class="chart__fallback">推移グラフの表示にはJavaScriptが必要です。上の比較表はJavaScriptなしで読めます。</p>
-    </div>
-  </section>
-
-  <section class="section">
-    <h2 class="section__title">この数字について</h2>
-    <ul class="notes">
-      <li>各取引所が公開しているAPIから、板の最良気配を5分ごとに取得して計算しています。編集部が調べた値ではありません。混雑時はもう少し間隔があきます。</li>
-      <li>表示しているのは<strong>スプレッドだけ</strong>です。取引手数料・入出金手数料は含みません。</li>
-      <li>取引所形式（板取引）の気配値です。販売所のレートは公開APIから取得できないため扱っていません。</li>
-      <li>スプレッドは秒単位で変わります。ここにあるのは観測した瞬間の値で、いま注文して同じ値で約定することを保証するものではありません。</li>
-      <li>特定の取引所をすすめるものでも、投資判断を助言するものでもありません。</li>
-    </ul>
-  </section>
-</main>
-
+${options.body}
 <footer class="foot">
-  <p>データは <a href="/api/latest.json">/api/latest.json</a> と <a href="/api/history.json">/api/history.json</a> でも取得できます。</p>
+  <p><a href="${esc(pathFor(otherLocale(locale)))}" hreflang="${otherLocale(locale)}">${esc(messages.otherLanguage)}</a></p>
+  <p>${esc(messages.dataFooter)} <a href="/api/latest.json">/api/latest.json</a></p>
 </footer>
-
-<script src="/app.js?v=${esc(data.assetVersion)}" defer></script>
+${options.withScript ? `<script src="/app.js?v=${esc(assetVersion)}" defer></script>` : ''}
 </body>
 </html>
 `;
 }
 
-function renderRanking(ranked: Ranked[], gapYen: number): string {
+/** タイトルの区切り。日本語は全角の縦棒、英語は半角のパイプが読みやすい。 */
+function titleJoin(locale: Locale, head: string, tail: string): string {
+  return locale === 'ja' ? `${head}｜${tail}` : `${head} | ${tail}`;
+}
+
+/** 「名前（CODE）」の括弧も言語に合わせる。英語に全角括弧を混ぜない。 */
+function withCode(locale: Locale, name: string, code: string): string {
+  return locale === 'ja' ? `${name}（${code}）` : `${name} (${code})`;
+}
+
+function header(locale: Locale, meta: string, homeHref: string): string {
+  const messages = t(locale);
+  return `<header class="head">
+  <h1><a href="${esc(homeHref)}">${esc(messages.siteName)}</a></h1>
+  <p class="head__meta">${meta}</p>
+</header>`;
+}
+
+/* 銘柄の一覧 --------------------------------------------------------- */
+
+export type IndexData = {
+  locale: Locale;
+  siteUrl: string;
+  assetVersion: string;
+  /** 銘柄ごとの、いちばん狭い取引所とその往復コスト。 */
+  rows: { pair: Pair; best: Ranked | null }[];
+  amountYen: number;
+};
+
+export function renderIndex(data: IndexData): string {
+  const { locale, rows, amountYen } = data;
+  const messages = t(locale);
+
+  const items = rows
+    .map(({ pair, best }) => {
+      const name = pairName(locale, pair);
+      const detail = best
+        ? `<span class="rank__cost">${esc(formatYen(best.costYen))}</span>
+           <span class="rank__pct">${esc(VENUE_LABEL[best.venue] ?? best.venue)}</span>`
+        : `<span class="rank__pct">${esc(messages.noData)}</span>`;
+      return `<li class="rank__item">
+        <span class="rank__venue"><a href="${esc(pairPath(locale, pair.id))}">${esc(withCode(locale, name, pair.code))}</a></span>
+        ${detail}
+      </li>`;
+    })
+    .join('\n');
+
+  return layout({
+    locale,
+    siteUrl: data.siteUrl,
+    assetVersion: data.assetVersion,
+    title: titleJoin(locale, messages.siteName, messages.tagline),
+    description: messages.description(pairName(locale, PAIRS[0] as Pair)),
+    pathFor: (l) => homePath(l),
+    body: `${header(locale, esc(messages.tagline), homePath(locale))}
+<main>
+  <section class="section">
+    <h2 class="section__title">${esc(messages.pairsTitle)}</h2>
+    <p class="lede__text">${esc(messages.indexLede(formatYen(amountYen)))}</p>
+    <ol class="rank">
+      ${items}
+    </ol>
+  </section>
+
+  <section class="section">
+    <h2 class="section__title">${esc(messages.aboutTitle)}</h2>
+    <ul class="notes">
+      ${messages.about.map((line) => `<li>${esc(line)}</li>`).join('\n      ')}
+    </ul>
+  </section>
+</main>`,
+  });
+}
+
+/* 銘柄ページ --------------------------------------------------------- */
+
+export type PairPageData = {
+  locale: Locale;
+  siteUrl: string;
+  assetVersion: string;
+  pair: Pair;
+  amountYen: number;
+  ranked: Ranked[];
+  gapYen: number;
+  observedAt: number | null;
+  now: number;
+  recentDays: string[];
+};
+
+export function renderPairPage(data: PairPageData): string {
+  const { locale, pair, amountYen, ranked, gapYen, observedAt, now } = data;
+  const messages = t(locale);
+  const name = pairName(locale, pair);
+  const stale = isStale(observedAt, now);
+
+  const meta = observedAt
+    ? esc(messages.observedAt(formatTime(observedAt, locale)))
+    : esc(messages.noData);
+
+  const days = data.recentDays
+    .map(
+      (day) =>
+        `<li><a href="${esc(dayPath(locale, pair.id, day))}">${esc(day)}</a></li>`,
+    )
+    .join('\n      ');
+
+  return layout({
+    locale,
+    siteUrl: data.siteUrl,
+    assetVersion: data.assetVersion,
+    title: titleJoin(
+      locale,
+      locale === 'ja'
+        ? `${withCode(locale, name, pair.code)}のスプレッド実測`
+        : `${withCode(locale, name, pair.code)} spread, measured`,
+      messages.siteName,
+    ),
+    description: messages.description(name),
+    pathFor: (l) => pairPath(l, pair.id),
+    withScript: true,
+    body: `${header(locale, meta, homePath(locale))}
+<main data-pair="${esc(pair.id)}">
+  ${stale ? `<p class="notice">${esc(messages.staleNotice(Math.floor((now - (observedAt as number)) / 60), formatTime(observedAt as number, locale)))}</p>` : ''}
+  <section class="lede">
+    <form class="amount" method="get" action="${esc(pairPath(locale, pair.id))}" data-pair="${esc(pair.id)}">
+      <label for="amount">${esc(messages.amountLabel)}</label>
+      <input id="amount" name="amount" type="text" inputmode="numeric" value="${amountYen.toLocaleString('ja-JP')}" autocomplete="off">
+      <span class="amount__unit">${esc(messages.amountUnit)}</span>
+      <button type="submit">${esc(messages.calculate)}</button>
+    </form>
+    <p class="lede__text">${esc(messages.lede(name))}</p>
+  </section>
+
+  ${ranked.length === 0 ? `<section class="section"><p class="empty">${esc(messages.noDataYet)}</p></section>` : renderRanking(locale, ranked, gapYen)}
+
+  <section class="section">
+    <h2 class="section__title">${esc(messages.chartTitle)}</h2>
+    <div id="chart" class="chart" data-loading="1"
+         data-pair="${esc(pair.id)}"
+         data-msg-notenough="${esc(messages.chartNotEnough(0))}"
+         data-msg-failed="${esc(messages.chartFailed)}">
+      <p class="chart__fallback">${esc(messages.chartNeedsJs)}</p>
+    </div>
+  </section>
+
+  ${
+    days
+      ? `<section class="section">
+    <h2 class="section__title">${esc(messages.recentDays)}</h2>
+    <ul class="days">
+      ${days}
+    </ul>
+  </section>`
+      : ''
+  }
+
+  <section class="section">
+    <h2 class="section__title">${esc(messages.aboutTitle)}</h2>
+    <ul class="notes">
+      ${messages.about.map((line) => `<li>${esc(line)}</li>`).join('\n      ')}
+    </ul>
+  </section>
+</main>`,
+  });
+}
+
+function renderRanking(locale: Locale, ranked: Ranked[], gapYen: number): string {
+  const messages = t(locale);
   const best = ranked[0];
   const rows = ranked
     .map((row, index) => {
@@ -144,54 +300,129 @@ function renderRanking(ranked: Ranked[], gapYen: number): string {
     </ol>
     ${
       best
-        ? `<p class="rank__note">いちばん狭いのは ${esc(VENUE_LABEL[best.venue] ?? best.venue)}。同じ瞬間の取引所間の価格差は ${esc(formatYen(gapYen))} でした。</p>`
+        ? `<p class="rank__note">${esc(messages.narrowest(VENUE_LABEL[best.venue] ?? best.venue, formatYen(gapYen)))}</p>`
         : ''
     }
   </section>`;
 }
 
-function renderStaleNotice(observedAt: number, now: number): string {
-  const minutes = Math.floor((now - observedAt) / 60);
-  return `<p class="notice">観測が${minutes}分止まっています。表示しているのは${esc(formatTime(observedAt))}時点の値です。</p>`;
+/* 日別ページ --------------------------------------------------------- */
+
+export type DailyPageData = {
+  locale: Locale;
+  siteUrl: string;
+  assetVersion: string;
+  pair: Pair;
+  day: string;
+  rows: DailyRow[];
+  prevDay: string | null;
+  nextDay: string | null;
+  amountYen: number;
+};
+
+export function renderDailyPage(data: DailyPageData): string {
+  const { locale, pair, day, rows, amountYen } = data;
+  const messages = t(locale);
+  const name = pairName(locale, pair);
+  const columns = messages.dailyColumns;
+
+  const sorted = [...rows].sort((a, b) => a.avg_bps - b.avg_bps);
+  const best = sorted[0];
+  const summary = best
+    ? `${messages.dailyBest(VENUE_LABEL[best.venue] ?? best.venue, formatPercent(best.avg_bps))}` +
+      `<br>${esc(messages.dailyCost(formatYen(amountYen), formatYen(costFromBps(amountYen, best.avg_bps))))}`
+    : '';
+
+  const body = sorted
+    .map(
+      (row) => `<tr>
+        <td>${esc(VENUE_LABEL[row.venue] ?? row.venue)}</td>
+        <td class="num">${esc(formatPercent(row.avg_bps))}</td>
+        <td class="num">${esc(formatPercent(row.min_bps))}</td>
+        <td class="num">${esc(formatPercent(row.max_bps))}</td>
+        <td class="num">${row.samples}</td>
+      </tr>`,
+    )
+    .join('\n');
+
+  const title = titleJoin(
+    locale,
+    locale === 'ja' ? `${day}の${name}スプレッド` : `${name} spreads on ${day}`,
+    messages.siteName,
+  );
+
+  return layout({
+    locale,
+    siteUrl: data.siteUrl,
+    assetVersion: data.assetVersion,
+    title,
+    description: messages.dailyIntro(name, day),
+    pathFor: (l) => dayPath(l, pair.id, day),
+    body: `${header(locale, esc(day), homePath(locale))}
+<main>
+  <section class="section">
+    <h2 class="section__title">${esc(messages.dailyTitle)}</h2>
+    <p class="lede__text">${esc(messages.dailyIntro(name, day))}</p>
+    ${
+      rows.length === 0
+        ? `<p class="empty">${esc(messages.dailyNone)}</p>`
+        : `<div class="table-wrap"><table class="table">
+      <thead><tr>
+        <th scope="col">${esc(columns.venue)}</th>
+        <th scope="col" class="num">${esc(columns.avg)}</th>
+        <th scope="col" class="num">${esc(columns.min)}</th>
+        <th scope="col" class="num">${esc(columns.max)}</th>
+        <th scope="col" class="num">${esc(columns.samples)}</th>
+      </tr></thead>
+      <tbody>
+        ${body}
+      </tbody>
+    </table></div>
+    <p class="rank__note">${summary}</p>`
+    }
+  </section>
+
+  <nav class="pager">
+    ${data.prevDay ? `<a class="button" href="${esc(dayPath(locale, pair.id, data.prevDay))}">← ${esc(messages.prevDay)}</a>` : '<span></span>'}
+    <a class="button" href="${esc(pairPath(locale, pair.id))}">${esc(messages.backToPair)}</a>
+    ${data.nextDay ? `<a class="button" href="${esc(dayPath(locale, pair.id, data.nextDay))}">${esc(messages.nextDay)} →</a>` : '<span></span>'}
+  </nav>
+</main>`,
+  });
 }
 
-/** 404と500。素のテキストを返すより、戻る先がある画面のほうが親切。 */
-export function renderNotFound(assetVersion: string, status: 404 | 500): string {
-  const heading = status === 404 ? 'ページが見つかりません' : '問題が起きました';
-  const detail =
-    status === 404
-      ? 'アドレスが変わったか、もともと存在しないページです。'
-      : '時間をおいてもう一度開いてみてください。';
+/* エラーページ ------------------------------------------------------- */
 
-  return `<!DOCTYPE html>
-<html lang="ja">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
-<meta name="robots" content="noindex">
-<title>${esc(heading)}｜スプレッド定点</title>
-<link rel="stylesheet" href="/style.css?v=${esc(assetVersion)}">
-</head>
-<body>
-<header class="head"><h1>スプレッド定点</h1></header>
+export function renderNotFound(
+  locale: Locale,
+  siteUrl: string,
+  assetVersion: string,
+  status: 404 | 500,
+): string {
+  const messages = t(locale);
+  const heading = status === 404 ? messages.notFoundTitle : messages.errorTitle;
+  const detail = status === 404 ? messages.notFoundBody : messages.errorBody;
+
+  return layout({
+    locale,
+    siteUrl,
+    assetVersion,
+    title: titleJoin(locale, heading, messages.siteName),
+    description: detail,
+    pathFor: (l) => homePath(l),
+    noindex: true,
+    body: `${header(locale, '', homePath(locale))}
 <main>
   <section class="section">
     <p class="empty__title">${esc(heading)}</p>
     <p class="empty__note">${esc(detail)}</p>
-    <p class="empty__note"><a href="/">最新のスプレッドを見る</a></p>
+    <p class="empty__note"><a href="${esc(homePath(locale))}">${esc(messages.backHome)}</a></p>
   </section>
-</main>
-</body>
-</html>
-`;
+</main>`,
+  });
 }
 
-function renderEmpty(): string {
-  return `<section class="section">
-    <p class="empty">まだ観測データがありません。定期取得が始まると、ここに比較が出ます。</p>
-  </section>`;
-}
+/* 整形 --------------------------------------------------------------- */
 
 /**
  * 金額の表示。小さいほうを丸めて0円にしないことが、このサイトでは特に大事になる。
@@ -221,11 +452,15 @@ export function formatPercent(bps: number): string {
   return `${Number(percent.toPrecision(2))}%`;
 }
 
-export function formatTime(ts: number): string {
+export function formatTime(ts: number, locale: Locale = 'ja'): string {
   const jst = new Date((ts + 9 * 3600) * 1000);
   const hh = String(jst.getUTCHours()).padStart(2, '0');
   const mm = String(jst.getUTCMinutes()).padStart(2, '0');
-  return `${jst.getUTCMonth() + 1}/${jst.getUTCDate()} ${hh}:${mm}`;
+  const month = jst.getUTCMonth() + 1;
+  const date = jst.getUTCDate();
+  return locale === 'ja'
+    ? `${month}/${date} ${hh}:${mm}`
+    : `${month}/${date} ${hh}:${mm} JST`;
 }
 
 export function esc(value: string): string {

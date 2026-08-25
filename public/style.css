@@ -244,6 +244,58 @@ h1 { margin: 0; font-size: 1.25rem; letter-spacing: 0.04em; }
 .chart .series-label--3 { fill: var(--series-3); }
 .chart .series-label--4 { fill: var(--series-4); }
 
+/* 日別リンクと前後のページ送り ------------------------------ */
+
+.days {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.days a {
+  display: inline-block;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  text-decoration: none;
+}
+
+.days a:hover { border-color: var(--color-accent); color: var(--color-accent); }
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-top: var(--space-5);
+}
+
+.button {
+  display: inline-block;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.875rem;
+  text-decoration: none;
+}
+
+.button:hover { border-color: var(--color-accent); color: var(--color-accent); }
+
+/* 見出しのリンクは、リンクに見せない（戻る導線としてだけ機能させる） */
+.head h1 a { color: inherit; text-decoration: none; }
+
+.rank__venue a { color: inherit; text-decoration: none; }
+.rank__venue a:hover { color: var(--color-accent); }
+
 /* 注記・フッター -------------------------------------------- */
 
 .notes {
@@ -263,7 +315,8 @@ h1 { margin: 0; font-size: 1.25rem; letter-spacing: 0.04em; }
   font-size: 0.8125rem;
 }
 
-.foot p { margin: 0; }
+.foot p { margin: 0 0 var(--space-1); }
+.foot p:last-child { margin-bottom: 0; }
 
 @media (max-width: 600px) {
   .head { padding-top: var(--space-4); }

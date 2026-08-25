@@ -4,48 +4,56 @@
  * どれも認証不要の公開APIで、板（取引所形式）の最良気配を返す。
  * 販売所レートは公開APIから取れないため、このサイトは扱わない。
  *
- * レスポンスの形は取引所ごとにバラバラなので、
- * 「取得」と「解釈」を分けて、解釈のほうだけをテストできるようにしている。
+ * レスポンスの形も、銘柄の指定方法も取引所ごとにバラバラなので、
+ * 「URLの組み立て」と「解釈」を分けて、解釈のほうだけをテストできるようにしている。
  */
 import { isPlausible, type Quote } from './spread.ts';
+import type { PairId } from './pairs.ts';
 
 export type VenueId = 'gmo' | 'bitbank' | 'bitflyer' | 'coincheck';
 
 export type Venue = {
   id: VenueId;
   label: string;
-  /** 板の気配値を返す公開APIエンドポイント。 */
-  url: string;
+  /** 銘柄ごとの公開APIエンドポイント。 */
+  url: (pair: PairId) => string;
   /** レスポンスから買値・売値を取り出す。取れなければ例外。 */
   parse: (payload: unknown) => { bid: number; ask: number };
 };
 
 export class VenueError extends Error {}
 
+/** 各取引所での銘柄の呼び方。同じBTCでも書き方が4通りある。 */
+const SYMBOL: Record<PairId, { upper: string; lowerJpy: string; upperJpy: string }> = {
+  btc: { upper: 'BTC', lowerJpy: 'btc_jpy', upperJpy: 'BTC_JPY' },
+  eth: { upper: 'ETH', lowerJpy: 'eth_jpy', upperJpy: 'ETH_JPY' },
+  xrp: { upper: 'XRP', lowerJpy: 'xrp_jpy', upperJpy: 'XRP_JPY' },
+};
+
 /** 表示順の基準にもなるので、ここの並びは触らない。 */
 export const VENUES: readonly Venue[] = [
   {
     id: 'gmo',
     label: 'GMOコイン',
-    url: 'https://api.coin.z.com/public/v1/ticker?symbol=BTC',
+    url: (pair) => `https://api.coin.z.com/public/v1/ticker?symbol=${SYMBOL[pair].upper}`,
     parse: parseGmo,
   },
   {
     id: 'bitbank',
     label: 'bitbank',
-    url: 'https://public.bitbank.cc/btc_jpy/ticker',
+    url: (pair) => `https://public.bitbank.cc/${SYMBOL[pair].lowerJpy}/ticker`,
     parse: parseBitbank,
   },
   {
     id: 'bitflyer',
     label: 'bitFlyer',
-    url: 'https://api.bitflyer.com/v1/ticker?product_code=BTC_JPY',
+    url: (pair) => `https://api.bitflyer.com/v1/ticker?product_code=${SYMBOL[pair].upperJpy}`,
     parse: parseBitflyer,
   },
   {
     id: 'coincheck',
     label: 'Coincheck',
-    url: 'https://coincheck.com/api/ticker',
+    url: (pair) => `https://coincheck.com/api/ticker?pair=${SYMBOL[pair].lowerJpy}`,
     parse: parseCoincheck,
   },
 ];
@@ -83,6 +91,9 @@ export function parseBitbank(payload: unknown): { bid: number; ask: number } {
 
 export function parseBitflyer(payload: unknown): { bid: number; ask: number } {
   const root = asObject(payload, 'bitFlyer');
+  if (typeof root['error_message'] === 'string') {
+    throw new VenueError(`bitFlyerがエラーを返しました: ${root['error_message']}`);
+  }
   const state = root['state'];
   if (typeof state === 'string' && state !== 'RUNNING') {
     throw new VenueError(`bitFlyerの板が稼働していません: state=${state}`);
@@ -99,14 +110,15 @@ export function parseCoincheck(payload: unknown): { bid: number; ask: number } {
 }
 
 /**
- * 全取引所を同時に取りにいく。1つが遅くても他を待たせない。
+ * 1銘柄について全取引所を同時に取りにいく。1つが遅くても他を待たせない。
  *
  * 比較の前提は「同じ瞬間の値であること」なので、直列に取ってはいけない。
  */
-export async function fetchAll(
+export async function fetchPair(
+  pair: PairId,
   timeoutMs = 8_000,
 ): Promise<{ quotes: Quote[]; errors: { venue: VenueId; message: string }[] }> {
-  const results = await Promise.all(VENUES.map((venue) => fetchOne(venue, timeoutMs)));
+  const results = await Promise.all(VENUES.map((venue) => fetchOne(venue, pair, timeoutMs)));
 
   const quotes: Quote[] = [];
   const errors: { venue: VenueId; message: string }[] = [];
@@ -119,10 +131,11 @@ export async function fetchAll(
 
 async function fetchOne(
   venue: Venue,
+  pair: PairId,
   timeoutMs: number,
 ): Promise<Quote | { venue: VenueId; message: string }> {
   try {
-    const response = await fetch(venue.url, {
+    const response = await fetch(venue.url(pair), {
       headers: { Accept: 'application/json' },
       signal: AbortSignal.timeout(timeoutMs),
     });

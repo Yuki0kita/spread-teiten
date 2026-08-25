@@ -6,14 +6,22 @@ import {
   MIN_AMOUNT_YEN,
   STALE_AFTER_SECONDS,
   clampAmount,
+  dayPath,
   esc,
   formatPercent,
   formatYen,
+  homePath,
   isStale,
+  pairPath,
+  renderDailyPage,
   renderNotFound,
-  renderPage,
+  renderPairPage,
 } from '../src/render.ts';
 import { rank } from '../src/spread.ts';
+import { PAIRS } from '../src/pairs.ts';
+
+const BTC = PAIRS[0];
+const BASE = { siteUrl: 'https://example.com', assetVersion: '1' };
 
 test('clampAmount: カンマや円を取り除いて読む', () => {
   assert.equal(clampAmount('100,000'), 100_000);
@@ -66,24 +74,28 @@ test('esc: HTMLに埋める値をエスケープする', () => {
   assert.equal(esc('<script>"x"&\'y\''), '&lt;script&gt;&quot;x&quot;&amp;&#39;y&#39;');
 });
 
-test('renderPage: 観測値があれば比較が出る', () => {
-  const ranked = rank(
-    [
-      { venue: 'gmo', bid: 12_571_818, ask: 12_571_877 },
-      { venue: 'coincheck', bid: 12_574_065, ask: 12_578_064 },
-    ],
-    100_000,
-  );
-  const html = renderPage({
+const pairPage = (overrides = {}) =>
+  renderPairPage({
+    ...BASE,
+    locale: 'ja',
+    pair: BTC,
     amountYen: 100_000,
-    ranked,
+    ranked: rank(
+      [
+        { venue: 'gmo', bid: 12_571_818, ask: 12_571_877 },
+        { venue: 'coincheck', bid: 12_574_065, ask: 12_578_064 },
+      ],
+      100_000,
+    ),
     gapYen: 7_870.5,
     observedAt: 1_787_667_040,
     now: 1_787_667_100,
-    assetVersion: '1',
-    siteUrl: 'https://example.com',
+    recentDays: ['2026-08-26', '2026-08-25'],
+    ...overrides,
   });
 
+test('renderPairPage: 観測値があれば比較が出る', () => {
+  const html = pairPage();
   assert.match(html, /<html lang="ja">/);
   assert.match(html, /GMOコイン/);
   assert.match(html, /rank__item--best/);
@@ -91,16 +103,8 @@ test('renderPage: 観測値があれば比較が出る', () => {
   assert.match(html, /取引手数料/);
 });
 
-test('renderPage: 観測値が無いときは空の案内を出す', () => {
-  const html = renderPage({
-    amountYen: 100_000,
-    ranked: [],
-    gapYen: 0,
-    observedAt: null,
-    now: 1_787_667_100,
-    assetVersion: '1',
-    siteUrl: 'https://example.com',
-  });
+test('renderPairPage: 観測値が無いときは空の案内を出す', () => {
+  const html = pairPage({ ranked: [], observedAt: null });
   assert.match(html, /まだ観測データがありません/);
   assert.doesNotMatch(html, /rank__item/);
 });
@@ -117,27 +121,66 @@ test('isStale: 観測がまだ1件も無いときは「古い」とは言わな�
   assert.equal(isStale(null, 1_787_667_100), false);
 });
 
-test('renderPage: 観測が止まっていたら画面の先頭で断る', () => {
+test('renderPairPage: 観測が止まっていたら画面の先頭で断る', () => {
   const observedAt = 1_787_600_000;
-  const html = renderPage({
-    amountYen: 100_000,
-    ranked: rank([{ venue: 'gmo', bid: 100, ask: 101 }], 100_000),
-    gapYen: 0,
-    observedAt,
-    now: observedAt + 3_600,
-    assetVersion: '1',
-    siteUrl: 'https://example.com',
-  });
+  const html = pairPage({ observedAt, now: observedAt + 3_600 });
   assert.match(html, /観測が60分止まっています/);
 });
 
 test('renderNotFound: 404と500で文面が変わり、noindexが付く', () => {
-  const notFound = renderNotFound('1', 404);
+  const notFound = renderNotFound('ja', 'https://example.com', '1', 404);
   assert.match(notFound, /ページが見つかりません/);
   assert.match(notFound, /name="robots" content="noindex"/);
 
-  const failure = renderNotFound('1', 500);
+  const failure = renderNotFound('ja', 'https://example.com', '1', 500);
   assert.match(failure, /問題が起きました/);
   // 内部情報を画面に出さない
   assert.doesNotMatch(failure, /stack|Error:|D1|DB/);
+});
+
+test('パスは /{lang}/{pair}/{date}/ の形になる', () => {
+  assert.equal(homePath('ja'), '/ja/');
+  assert.equal(pairPath('en', 'btc'), '/en/btc/');
+  assert.equal(dayPath('ja', 'eth', '2026-08-26'), '/ja/eth/2026-08-26/');
+});
+
+test('hreflang と canonical が言語ごとに正しく出る', () => {
+  const html = pairPage();
+  assert.match(html, /<link rel="canonical" href="https:\/\/example.com\/ja\/btc\/">/);
+  assert.match(html, /hreflang="ja" href="https:\/\/example.com\/ja\/btc\/"/);
+  assert.match(html, /hreflang="en" href="https:\/\/example.com\/en\/btc\/"/);
+  assert.match(html, /hreflang="x-default" href="https:\/\/example.com\/ja\/btc\/"/);
+});
+
+test('英語ページは英語で出て、canonicalも英語側を指す', () => {
+  const html = pairPage({ locale: 'en' });
+  assert.match(html, /<html lang="en">/);
+  assert.match(html, /<link rel="canonical" href="https:\/\/example.com\/en\/btc\/">/);
+  assert.match(html, /Only the spread is shown/);
+  assert.doesNotMatch(html, /取引手数料/);
+});
+
+test('銘柄ページから日別ページへの導線がある', () => {
+  const html = pairPage();
+  assert.match(html, /\/ja\/btc\/2026-08-26\//);
+});
+
+test('renderDailyPage: 記録を表にして、金額に直した結論を添える', () => {
+  const html = renderDailyPage({
+    ...BASE,
+    locale: 'ja',
+    pair: BTC,
+    day: '2026-08-26',
+    rows: [
+      { day: '2026-08-26', venue: 'gmo', avg_bps: 0.5, min_bps: 0.1, max_bps: 2, samples: 200 },
+      { day: '2026-08-26', venue: 'bitflyer', avg_bps: 3, min_bps: 1, max_bps: 9, samples: 200 },
+    ],
+    prevDay: '2026-08-25',
+    nextDay: null,
+    amountYen: 100_000,
+  });
+  assert.match(html, /2026-08-26/);
+  assert.match(html, /GMOコイン/);
+  assert.match(html, /この日いちばん狭かったのは GMOコイン/);
+  assert.match(html, /\/ja\/btc\/2026-08-25\//);
 });

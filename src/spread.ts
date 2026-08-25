@@ -51,6 +51,20 @@ export function roundTripCostYen(amountYen: number, bid: number, ask: number): n
   return (amountYen * (ask - bid)) / ask;
 }
 
+/**
+ * スプレッド（bps）から往復コストを出す。
+ *
+ * 日次ページは気配値そのものではなく平均スプレッドしか持っていない。
+ * 比率のままでは実感が湧かないので、必ず金額に直して見せるために使う。
+ */
+export function costFromBps(amountYen: number, bps: number): number {
+  if (!(amountYen > 0)) throw new RangeError('金額は1円以上で指定してください。');
+  if (bps <= 0) return 0;
+  // 中値をmidとすると ask-bid = bps/10000*mid、ask = mid*(1+bps/20000)。
+  // amount*(ask-bid)/ask を約分すると mid が消える。
+  return (amountYen * (bps / 10_000)) / (1 + bps / 20_000);
+}
+
 /** 記録してよい気配値か。桁飛びや板停止をここで落とす。 */
 export function isPlausible(bid: number, ask: number): boolean {
   if (!Number.isFinite(bid) || !Number.isFinite(ask)) return false;
