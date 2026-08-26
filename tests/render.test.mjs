@@ -19,6 +19,8 @@ import {
 } from '../src/render.ts';
 import { rank } from '../src/spread.ts';
 import { PAIRS } from '../src/pairs.ts';
+import { t as messagesFor } from '../src/i18n.ts';
+const tJa = messagesFor('ja');
 
 const BTC = PAIRS[0];
 const BASE = { siteUrl: 'https://example.com', assetVersion: '1' };
@@ -227,4 +229,30 @@ test('renderPairPage: 板の観測がまだ無いときは、その旨だけ出�
   const html = pairPage({ depth: [] });
   assert.match(html, /まだ板を観測できていません/);
   assert.doesNotMatch(html, /cell--best/);
+});
+
+
+test('renderPairPage: 販売所の注意を、実効コストの表のすぐ下に出す', () => {
+  const html = pairPage({
+    depth: [{ venue: 'gmo', costs: { '100000': 29, '300000': 120, '1000000': 519, '3000000': 2600, '10000000': 12000 } }],
+  });
+  assert.match(html, /販売所/);
+  assert.match(html, /notice--warn/);
+
+  // ページ下部の注記ではなく、表の直後に出ていること
+  const tableAt = html.indexOf('金額別の実効コスト');
+  const warnAt = html.indexOf('notice--warn');
+  const bottomNotesAt = html.indexOf('この数字について');
+  assert.ok(tableAt < warnAt, '注意が表より前に出ている');
+  assert.ok(warnAt < bottomNotesAt, '注意がページ下部に埋もれている');
+});
+
+test('販売所の注意に、実測していない数値を書かない', () => {
+  // 販売所レートは公開APIから取れない。ここに%や円を書くと実測でない数字が混ざる
+  const html = pairPage({ depth: [] });
+  const lead = tJa.dealerWarnLead + tJa.dealerWarnBody;
+  assert.doesNotMatch(lead, /[0-9]+\s*%/);
+  assert.doesNotMatch(lead, /[0-9,]+\s*円/);
+  assert.doesNotMatch(lead, /[0-9]+\s*倍/);
+  assert.match(html, /板の値段だけ/);
 });

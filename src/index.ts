@@ -56,7 +56,7 @@ type Bindings = {
 };
 
 /** CSSとJSのキャッシュを確実に切り替えるための版。変更したら上げる。 */
-const ASSET_VERSION = '10';
+const ASSET_VERSION = '11';
 
 const DEFAULT_HISTORY_HOURS = 24;
 const MAX_HISTORY_HOURS = 24 * 14;

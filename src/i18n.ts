@@ -52,6 +52,8 @@ type Messages = {
   depthNotEnough: string;
   depthNone: string;
   depthInsight: (small: string, large: string) => string;
+  dealerWarnLead: string;
+  dealerWarnBody: string;
   depthSameVenue: (venue: string) => string;
   bestQuoteTitle: string;
   bestQuoteNote: string;
@@ -114,6 +116,9 @@ const JA: Messages = {
   depthNone: 'まだ板を観測できていません。',
   depthInsight: (small, large) =>
     `金額によって答えが変わります。少額なら${small}、大口なら${large}がいちばん安く済みます。`,
+  dealerWarnLead: '同じ取引所でも「販売所」で買うと、この値段では買えません。',
+  dealerWarnBody:
+    '販売所は相手方が値段を決める仕組みで、板で買うより不利になります。差は桁で変わることもあります。このサイトが測っているのは板の値段だけです。「取引所」「板」と書かれた画面で買ってください。',
   depthSameVenue: (venue) => `どの金額でも${venue}がいちばん安く済みます。`,
   bestQuoteTitle: '板の一番上だけを見た場合',
   bestQuoteNote:
@@ -176,6 +181,9 @@ const EN: Messages = {
   depthNone: 'No order book observations yet.',
   depthInsight: (small, large) =>
     `The answer depends on size. ${small} is cheapest for small orders, ${large} for large ones.`,
+  dealerWarnLead: 'At the same exchange, the dealer desk will not sell to you at these prices.',
+  dealerWarnBody:
+    'A dealer desk (hanbaisho) sets its own price as your counterparty, which is worse than buying on the book, sometimes by orders of magnitude. This site measures the order book only. Buy on the screen labelled 取引所 or 板.',
   depthSameVenue: (venue) => `${venue} is cheapest at every size.`,
   bestQuoteTitle: 'Top of book only',
   bestQuoteNote:

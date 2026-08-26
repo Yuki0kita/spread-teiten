@@ -299,10 +299,12 @@ function renderDepth(
   depth: { venue: string; costs: Record<string, number | null> }[],
 ): string {
   const messages = t(locale);
+  // 板の観測がまだ無くても注意は出す。販売所を押してしまう危険はデータの有無と関係ない。
   if (depth.length === 0) {
     return `<section class="section">
     <h2 class="section__title">${esc(messages.depthTitle)}</h2>
     <p class="empty">${esc(messages.depthNone)}</p>
+    ${renderDealerWarning(locale)}
   </section>`;
   }
 
@@ -351,7 +353,26 @@ function renderDepth(
       </tbody>
     </table></div>
     ${insight ? `<p class="rank__note">${esc(insight)}</p>` : ''}
+    ${renderDealerWarning(locale)}
   </section>`;
+}
+
+/**
+ * 販売所についての注意。表のすぐ下に置く。
+ *
+ * このサイトを見て取引所を決めた人が、アプリを開いて目立つ「販売所」で買ってしまうと、
+ * ここに出ている数字とは桁のちがう金額を払うことになる。
+ * ページ下部の注記にも書いてあるが、あの位置は読まれない。
+ * 数字を見た直後、まだ画面を見ているうちに伝える必要がある。
+ *
+ * 販売所のレートは公開APIから取れないため、金額は書かない。
+ * 実測でない数字をこのサイトに混ぜると、実測であることの意味がなくなる。
+ */
+function renderDealerWarning(locale: Locale): string {
+  const messages = t(locale);
+  return `<p class="notice notice--warn">
+      <strong>${esc(messages.dealerWarnLead)}</strong><br>${esc(messages.dealerWarnBody)}
+    </p>`;
 }
 
 function renderRanking(locale: Locale, ranked: Ranked[], gapYen: number): string {

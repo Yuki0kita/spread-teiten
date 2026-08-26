@@ -7,6 +7,8 @@
   --color-border: #e5e5e2;
   --color-accent: #2f4f7f;
   --color-accent-weak: #eaeff6;
+  /* 注意書き専用。アクセント1色の原則を崩さないよう、ここ以外では使わない。 */
+  --color-warn: #8a5620;
 
   --series-1: #2f4f7f;
   --series-2: #5b7aa6;
@@ -31,6 +33,7 @@
     --color-border: #2b2e32;
     --color-accent: #7fa6d8;
     --color-accent-weak: #1e2833;
+    --color-warn: #d9a262;
 
     --series-1: #9dbeea;
     --series-2: #7794bd;
@@ -244,6 +247,14 @@ h1 { margin: 0; font-size: 1.25rem; letter-spacing: 0.04em; }
 .chart .series-label--2 { fill: var(--series-2); }
 .chart .series-label--3 { fill: var(--series-3); }
 .chart .series-label--4 { fill: var(--series-4); }
+
+/* 販売所についての注意。数字を見た直後に目に入る位置に出す。 */
+.notice--warn {
+  margin: var(--space-3) 0 0;
+  border-left-color: var(--color-warn);
+}
+
+.notice--warn strong { color: var(--color-warn); font-weight: 600; }
 
 /* 金額別の実効コスト表 -------------------------------------- */
 
