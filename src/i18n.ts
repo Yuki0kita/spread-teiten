@@ -71,7 +71,7 @@ const JA: Messages = {
   siteName: 'スプレッド定点',
   tagline: '国内取引所のスプレッドを実測して記録',
   description: (pair) =>
-    `国内の暗号資産取引所の${pair}のスプレッドを5分ごとに実測して記録しています。同じ金額を買って売り戻したときに消える金額を、実測値で比べられます。`,
+    `国内の暗号資産取引所の${pair}のスプレッドを1分ごとに実測して記録しています。同じ金額を買って売り戻したときに消える金額を、実測値で比べられます。`,
   amountLabel: '金額',
   amountUnit: '円',
   calculate: '計算',
@@ -91,7 +91,7 @@ const JA: Messages = {
   chartFailed: '推移グラフを読み込めませんでした。',
   aboutTitle: 'この数字について',
   about: [
-    '各取引所が公開しているAPIから、板の最良気配を5分ごとに取得して計算しています。編集部が調べた値ではありません。混雑時はもう少し間隔があきます。',
+    '各取引所が公開しているAPIから、板の最良気配を1分ごとに取得して計算しています。編集部が調べた値ではありません。取得に失敗した回は欠測として扱い、日別ページの観測数に出しています。',
     '表示しているのはスプレッドだけです。取引手数料・入出金手数料は含みません。',
     '取引所形式（板取引）の気配値です。販売所のレートは公開APIから取得できないため扱っていません。',
     'スプレッドは秒単位で変わります。ここにあるのは観測した瞬間の値で、いま注文して同じ値で約定することを保証するものではありません。',
@@ -122,7 +122,7 @@ const EN: Messages = {
   siteName: 'Spread Teiten',
   tagline: 'Measured spreads on Japanese crypto exchanges',
   description: (pair) =>
-    `We measure ${pair} spreads on Japanese crypto exchanges every five minutes and keep the record. Compare what a trade actually costs you, using measured numbers rather than published claims.`,
+    `We measure ${pair} spreads on Japanese crypto exchanges every minute and keep the record. Compare what a trade actually costs you, using measured numbers rather than published claims.`,
   amountLabel: 'Amount',
   amountUnit: 'JPY',
   calculate: 'Calculate',
@@ -141,7 +141,7 @@ const EN: Messages = {
   chartFailed: 'Could not load the chart.',
   aboutTitle: 'About these numbers',
   about: [
-    'Best bid and ask are read from each exchange’s public API every five minutes and the spread is computed from them. Nobody looked these up by hand. The interval stretches a little when things are busy.',
+    'Best bid and ask are read from each exchange’s public API every minute and the spread is computed from them. Nobody looked these up by hand. Failed reads are counted as gaps and shown in the sample count on each daily page.',
     'Only the spread is shown. Trading fees and deposit or withdrawal fees are not included.',
     'These are order book quotes. Dealer (hanbaisho) rates are not available from public APIs, so they are not covered.',
     'Spreads move by the second. These are the values at the moment of observation and are no guarantee of the price you will get.',

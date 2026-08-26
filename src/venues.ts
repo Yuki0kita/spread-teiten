@@ -23,6 +23,12 @@ export type Venue = {
 
 export class VenueError extends Error {}
 
+/** もう一度試せば直るかもしれない失敗（5xx・接続断）。 */
+class RetriableError extends VenueError {}
+
+/** 5xxを受けたときに待つ時間。長くすると全体の取得が遅れる。 */
+const RETRY_DELAY_MS = 400;
+
 /** 各取引所での銘柄の呼び方。同じBTCでも書き方が4通りある。 */
 const SYMBOL: Record<PairId, { upper: string; lowerJpy: string; upperJpy: string }> = {
   btc: { upper: 'BTC', lowerJpy: 'btc_jpy', upperJpy: 'BTC_JPY' },
@@ -129,27 +135,59 @@ export async function fetchPair(
   return { quotes, errors };
 }
 
+/**
+ * 1取引所ぶんの取得。5xxのときだけ一度だけ取り直す。
+ *
+ * bitFlyerはCloudflareの経路からだと503を返すことがあり、放っておくと
+ * その取引所だけ観測が2割ほど欠ける。欠けた時間帯が値動きの荒い時間に偏ると、
+ * その取引所の平均スプレッドが実際より狭く見えてしまう。
+ * 解釈の失敗（レスポンスの形が違う等）は待っても直らないので、やり直さない。
+ */
 async function fetchOne(
   venue: Venue,
   pair: PairId,
   timeoutMs: number,
 ): Promise<Quote | { venue: VenueId; message: string }> {
+  let last = '';
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await fetchQuote(venue, pair, timeoutMs);
+    } catch (error) {
+      last = messageOf(error);
+      if (attempt === 0 && error instanceof RetriableError) {
+        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+        continue;
+      }
+      break;
+    }
+  }
+  return { venue: venue.id, message: last };
+}
+
+async function fetchQuote(venue: Venue, pair: PairId, timeoutMs: number): Promise<Quote> {
+  let response: Response;
   try {
-    const response = await fetch(venue.url(pair), {
+    response = await fetch(venue.url(pair), {
       headers: { Accept: 'application/json' },
       signal: AbortSignal.timeout(timeoutMs),
     });
-    if (!response.ok) {
-      throw new VenueError(`HTTP ${response.status}`);
-    }
-    const { bid, ask } = venue.parse(await response.json());
-    if (!isPlausible(bid, ask)) {
-      throw new VenueError(`気配値が異常です: bid=${bid} ask=${ask}`);
-    }
-    return { venue: venue.id, bid, ask };
   } catch (error) {
-    return { venue: venue.id, message: messageOf(error) };
+    // 接続できなかった場合も、もう一度なら通ることがある。
+    throw new RetriableError(messageOf(error));
   }
+
+  if (response.status >= 500) {
+    throw new RetriableError(`HTTP ${response.status}`);
+  }
+  if (!response.ok) {
+    throw new VenueError(`HTTP ${response.status}`);
+  }
+
+  const { bid, ask } = venue.parse(await response.json());
+  if (!isPlausible(bid, ask)) {
+    throw new VenueError(`気配値が異常です: bid=${bid} ask=${ask}`);
+  }
+  return { venue: venue.id, bid, ask };
 }
 
 function asObject(value: unknown, who: string): Record<string, unknown> {
