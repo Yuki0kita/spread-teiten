@@ -144,10 +144,10 @@ Cronの設定は `wrangler.jsonc` に残してあるが、いまは発火して�
 ### 4. 公開後に確認する
 
 ```bash
-curl -s https://spread-teiten.family-camera-yuki.workers.dev/api/errors.json
+curl -s https://spread-teiten.teiten.workers.dev/api/errors.json
 ```
 
-Search Consoleに `https://spread-teiten.family-camera-yuki.workers.dev/sitemap.xml` を登録する。
+Search Consoleに `https://spread-teiten.teiten.workers.dev/sitemap.xml` を登録する。
 OGPは実際にXへURLを貼ってプレビューを確認する（`/og.png` が1200×630で出る）。
 
 ## 観測を動かす経路が2つある理由
@@ -162,7 +162,7 @@ CloudflareのCron Triggerは、登録されていても発火しないことが�
 
 ```bash
 curl -X POST -H "Authorization: Bearer $COLLECT_TOKEN" \
-  https://spread-teiten.family-camera-yuki.workers.dev/internal/collect
+  https://spread-teiten.teiten.workers.dev/internal/collect
 ```
 
 - トークンは Worker のシークレット `COLLECT_TOKEN`。`npx wrangler secret put COLLECT_TOKEN` で登録する

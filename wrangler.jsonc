@@ -20,7 +20,7 @@
     "crons": ["* * * * *"]
   },
   "vars": {
-    "SITE_URL": "https://spread-teiten.family-camera-yuki.workers.dev"
+    "SITE_URL": "https://spread-teiten.teiten.workers.dev"
   },
   "observability": {
     "enabled": true

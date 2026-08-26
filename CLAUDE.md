@@ -75,7 +75,7 @@ CloudflareのCron Triggerは登録されていても発火しないことがあ�
 
 ```bash
 curl -X POST -H "Authorization: Bearer $(cat .collect-token)" \
-  https://spread-teiten.family-camera-yuki.workers.dev/internal/collect
+  https://spread-teiten.teiten.workers.dev/internal/collect
 ```
 
 `.collect-token` はコミットしない（`.gitignore` 済み）。

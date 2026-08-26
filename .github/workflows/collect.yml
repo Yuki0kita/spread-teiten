@@ -19,7 +19,7 @@ jobs:
       - name: Collect one observation
         env:
           COLLECT_TOKEN: ${{ secrets.COLLECT_TOKEN }}
-          SITE_URL: https://spread-teiten.family-camera-yuki.workers.dev
+          SITE_URL: https://spread-teiten.teiten.workers.dev
         run: |
           if [ -z "$COLLECT_TOKEN" ]; then
             echo "COLLECT_TOKEN が未設定です。リポジトリのSecretsに登録してください。" >&2
