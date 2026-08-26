@@ -14,8 +14,9 @@
  */
 import { costFromBps, type Ranked } from './spread.ts';
 import { AMOUNT_LADDER } from './depth.ts';
+import { formatRatio, loudest, overallLevel, type VenuePulse } from './pulse.ts';
 import { DEFAULT_LOCALE, LOCALES, otherLocale, pairName, t, type Locale } from './i18n.ts';
-import { PAIRS, type Pair, type PairId } from './pairs.ts';
+import { type Pair, type PairId } from './pairs.ts';
 import { VENUE_LABEL } from './venues.ts';
 import type { DailyRow } from './store.ts';
 
@@ -152,38 +153,55 @@ function hero(headline: string, sub: string): string {
   </section>`;
 }
 
-/* 銘柄の一覧 --------------------------------------------------------- */
+/* 監視画面 ----------------------------------------------------------- */
 
-export type IndexData = {
+export type WatchData = {
   locale: Locale;
   siteUrl: string;
   assetVersion: string;
-  /**
-   * 銘柄ごとの、いちばん安い取引所とその往復コスト。
-   * 銘柄ページと同じく、板を食い進んで出した実効コストを使う。
-   * ここだけ最良気配の数字を出すと、ページによって答えが変わってしまう。
-   */
-  rows: { pair: Pair; venue: string | null; costYen: number | null }[];
-  amountYen: number;
+  pairs: { pair: Pair; observedAt: number | null; venues: VenuePulse[] }[];
+  now: number;
 };
 
-export function renderIndex(data: IndexData): string {
-  const { locale, rows, amountYen } = data;
+/**
+ * 開きっぱなしにしてもらう画面。
+ *
+ * 普段はほとんど数字を出さない。倍率を全行に出すと、どれも1倍前後で並んで
+ * 見るべきものが消える。荒れている行にだけ数字と色を出し、
+ * 静かなときは形（スパークライン）だけが並ぶ状態にする。
+ */
+export function renderWatch(data: WatchData): string {
+  const { locale } = data;
   const messages = t(locale);
+  const all = data.pairs.flatMap((p) => p.venues);
+  const level = overallLevel(all);
 
-  const items = rows
-    .map(({ pair, venue, costYen }) => {
-      const name = pairName(locale, pair);
-      const detail =
-        venue !== null && costYen !== null
-          ? `<span class="rank__cost">${esc(formatYen(costYen))}</span>
-           <span class="rank__pct">${esc(VENUE_LABEL[venue] ?? venue)}</span>`
-          : `<span class="rank__pct">${esc(messages.noData)}</span>`;
-      return `<li class="rank__item">
-        <span class="rank__venue"><a href="${esc(pairPath(locale, pair.id))}">${esc(withCode(locale, name, pair.code))}</a></span>
-        ${detail}
-      </li>`;
-    })
+  const headline = (() => {
+    if (level === 'calm') return messages.watchCalm;
+    const worst = data.pairs
+      .map((p) => ({ pair: p.pair, top: loudest(p.venues) }))
+      .filter((row) => row.top !== null)
+      .sort((a, b) => (b.top?.ratio ?? 0) - (a.top?.ratio ?? 0))[0];
+    if (!worst?.top) return messages.watchCalm;
+    const venueLabel = VENUE_LABEL[worst.top.venue] ?? worst.top.venue;
+    const name = pairName(locale, worst.pair);
+    return level === 'alert'
+      ? messages.watchAlert(venueLabel, name)
+      : messages.watchWatch(venueLabel, name);
+  })();
+
+  const sections = data.pairs
+    .map(
+      ({ pair, venues }) => `<section class="watch__pair" data-pair="${esc(pair.id)}">
+      <h2 class="watch__pairname">
+        <a href="${esc(pairPath(locale, pair.id))}">${esc(pairName(locale, pair))}</a>
+        <span class="watch__code">${esc(pair.code)}</span>
+      </h2>
+      <ul class="watch__rows">
+        ${venues.map((v) => renderWatchRow(locale, v)).join('\n        ')}
+      </ul>
+    </section>`,
+    )
     .join('\n');
 
   return layout({
@@ -191,30 +209,67 @@ export function renderIndex(data: IndexData): string {
     siteUrl: data.siteUrl,
     assetVersion: data.assetVersion,
     title: titleJoin(locale, messages.siteName, messages.tagline),
-    description: messages.description(pairName(locale, PAIRS[0] as Pair)),
+    description: messages.watchSub,
     pathFor: (l) => homePath(l),
-    body: `${header(locale, esc(messages.tagline), homePath(locale))}
-<main>
-  ${hero(messages.heroIndex, messages.heroSub)}
-
-  <section class="section">
-    <h2 class="section__title">${esc(messages.pairsTitle)}</h2>
-    <p class="lede__text">${esc(messages.indexLede(formatYen(amountYen)))}</p>
-    <ol class="rank">
-      ${items}
-    </ol>
-    <p class="rank__note">${esc(messages.indexNote)}</p>
-    ${renderDealerWarning(locale)}
+    withScript: true,
+    body: `${header(locale, `<span id="watchState" class="watch__state">${esc(messages.watchUpdating)}</span>`, homePath(locale))}
+<main id="watch" data-level="${level}"
+      data-msg-calm="${esc(messages.watchCalm)}"
+      data-msg-updating="${esc(messages.watchUpdating)}"
+      data-msg-stopped="${esc(messages.watchStopped)}">
+  <section class="hero hero--watch">
+    <h1 class="hero__line" id="watchHeadline">${esc(headline)}</h1>
+    <p class="hero__sub">${esc(messages.watchSub)}</p>
   </section>
 
-  <section class="section">
-    <h2 class="section__title">${esc(messages.aboutTitle)}</h2>
-    <ul class="notes">
-      ${messages.about.map((line) => `<li>${esc(line)}</li>`).join('\n      ')}
-    </ul>
-  </section>
+  <div id="watchBody">
+    ${sections}
+  </div>
+
+  <p class="watch__legend">${esc(messages.watchLegend)}</p>
 </main>`,
   });
+}
+
+function renderWatchRow(locale: Locale, v: VenuePulse): string {
+  const messages = t(locale);
+  const label = VENUE_LABEL[v.venue] ?? v.venue;
+  // 普段どおりのときは倍率を出さない。全行に数字が並ぶと見るべき行が消える。
+  const ratio =
+    v.level === 'calm'
+      ? ''
+      : `<span class="watch__ratio">${esc(formatRatio(v.ratio))}</span>`;
+
+  return `<li class="watch__row watch__row--${v.level}" data-venue="${esc(v.venue)}">
+          <span class="watch__venue">${esc(label)}</span>
+          <span class="watch__bps">${v.bps === null ? '—' : esc(formatPercent(v.bps))}</span>
+          ${ratio}
+          <span class="watch__spark" aria-label="${esc(messages.baselineLabel)}">${sparkline(v.spark)}</span>
+        </li>`;
+}
+
+/**
+ * スパークライン。目盛りも軸も置かない。
+ * ここで読み取ってほしいのは値ではなく、いつもと形が違うかどうかだけ。
+ */
+export function sparkline(values: number[], width = 96, height = 20): string {
+  const points = values.filter((v) => Number.isFinite(v));
+  if (points.length < 2) return '';
+
+  const max = Math.max(...points);
+  const min = Math.min(...points);
+  const span = max - min || 1;
+  const step = width / (points.length - 1);
+
+  const d = points
+    .map((v, i) => {
+      const x = i * step;
+      const y = height - ((v - min) / span) * (height - 2) - 1;
+      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join('');
+
+  return `<svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" aria-hidden="true"><path d="${d}" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
 }
 
 /* 銘柄ページ --------------------------------------------------------- */

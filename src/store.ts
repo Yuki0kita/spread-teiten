@@ -74,6 +74,27 @@ export async function bucketsSince(
   return results;
 }
 
+/**
+ * 監視画面のための、取引所ごとの10分足。
+ *
+ * 平常時の基準（中央値）とスパークラインを同じ1回の読み取りでまかなう。
+ * 別々に引くと読み取り量が倍になる。
+ */
+export async function bucketSeries(
+  db: D1Database,
+  pair: PairId,
+  since: number,
+): Promise<{ venue: string; bucket: number; avg_bps: number }[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT venue, bucket, avg_bps FROM buckets
+       WHERE pair = ?1 AND bucket >= ?2 ORDER BY bucket ASC`,
+    )
+    .bind(pair, bucketOf(since))
+    .all<{ venue: string; bucket: number; avg_bps: number }>();
+  return results;
+}
+
 /** 日次ページの中身。1日ぶんなので取引所の数だけしか読まない。 */
 export async function dailyFor(
   db: D1Database,

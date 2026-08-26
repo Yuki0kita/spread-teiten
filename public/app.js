@@ -257,3 +257,102 @@ function text(x, y, content, className, anchor) {
   node.textContent = content;
   return node;
 }
+
+// --- 監視画面の自動更新 ---------------------------------------------
+// 開きっぱなしにしてもらう画面なので、こちらから静かに取りに行く。
+// 更新は差し替えではなく、変わった文字だけを書き換える。丸ごと作り直すと
+// 見ている最中に画面がちらつき、落ち着かない画面になる。
+
+const watch = document.getElementById('watch');
+
+if (watch) {
+  const REFRESH_MS = 60_000;
+  const state = document.getElementById('watchState');
+  const headline = document.getElementById('watchHeadline');
+
+  const percent2 = (bps) => (bps === null ? '—' : percent(bps));
+  const ratioText = (r) => (r === null ? '—' : r >= 10 ? `${Math.round(r)}倍` : `${r.toFixed(1)}倍`);
+
+  const apply = (data) => {
+    let worst = null;
+    for (const pair of data.pairs) {
+      for (const v of pair.venues) {
+        const row = document.querySelector(
+          `.watch__pair[data-pair="${pair.pair}"] .watch__row[data-venue="${v.venue}"]`,
+        );
+        if (!row) continue;
+
+        row.className = `watch__row watch__row--${v.level}`;
+        row.querySelector('.watch__bps').textContent = percent2(v.spread_bps);
+
+        // 倍率は荒れている行にだけ出す。静かな行に数字を残すと見るべき行が埋もれる。
+        let chip = row.querySelector('.watch__ratio');
+        if (v.level === 'calm') {
+          if (chip) chip.remove();
+        } else {
+          if (!chip) {
+            chip = document.createElement('span');
+            chip.className = 'watch__ratio';
+            row.insertBefore(chip, row.querySelector('.watch__spark'));
+          }
+          chip.textContent = ratioText(v.ratio);
+        }
+
+        const spark = row.querySelector('.watch__spark');
+        if (spark && v.spark && v.spark.length > 1) spark.innerHTML = drawSpark(v.spark);
+
+        if (v.ratio !== null && (worst === null || v.ratio > worst.ratio)) {
+          worst = { ratio: v.ratio, venue: v.venue, level: v.level, pair: pair.pair };
+        }
+      }
+    }
+
+    const level = worst && worst.level !== 'calm' ? worst.level : 'calm';
+    watch.dataset.level = level;
+    if (headline && watch.dataset.msgCalm && level === 'calm') {
+      headline.textContent = watch.dataset.msgCalm;
+    }
+  };
+
+  const tick = async () => {
+    try {
+      const response = await fetch('/api/pulse.json', { cache: 'no-cache' });
+      if (!response.ok) throw new Error(String(response.status));
+      apply(await response.json());
+      if (state) {
+        state.textContent = watch.dataset.msgUpdating || '';
+        state.classList.remove('watch__state--stopped');
+      }
+    } catch {
+      // 取れなかったことを黙って隠さない。古い値を新しい顔で見せるのがいちばん困る。
+      if (state) {
+        state.textContent = watch.dataset.msgStopped || '';
+        state.classList.add('watch__state--stopped');
+      }
+    }
+  };
+
+  setInterval(tick, REFRESH_MS);
+  // タブを戻したときは待たずに取り直す。放置後に古い値を見せないため。
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) tick();
+  });
+}
+
+/** src/render.ts の sparkline と同じ描き方。形だけ読めれば十分なので軸は置かない。 */
+function drawSpark(values, width = 96, height = 20) {
+  const points = values.filter((v) => Number.isFinite(v));
+  if (points.length < 2) return '';
+  const max = Math.max(...points);
+  const min = Math.min(...points);
+  const span = max - min || 1;
+  const step = width / (points.length - 1);
+  const d = points
+    .map((v, i) => {
+      const x = i * step;
+      const y = height - ((v - min) / span) * (height - 2) - 1;
+      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join('');
+  return `<svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" aria-hidden="true"><path d="${d}" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+}

@@ -33,6 +33,15 @@ type Messages = {
   heroIndex: string;
   heroPair: (pairName: string) => string;
   heroSub: string;
+  watchCalm: string;
+  watchWatch: (venue: string, pair: string) => string;
+  watchAlert: (venue: string, pair: string) => string;
+  watchSub: string;
+  watchLegend: string;
+  watchUpdating: string;
+  watchStopped: string;
+  watchOpenPair: string;
+  baselineLabel: string;
   description: (pairName: string) => string;
   amountLabel: string;
   amountUnit: string;
@@ -88,6 +97,16 @@ const JA: Messages = {
   heroIndex: 'いくら買うかで、いちばん安い取引所は変わります',
   heroPair: (pair) => `${pair}は、いくら買うかで安い取引所が変わります`,
   heroSub: '国内4取引所の板を実測して、実際に消える金額で比べています。',
+  watchCalm: 'いまは静かです',
+  watchWatch: (venue, pair) => `${pair}の${venue}が少し薄くなっています`,
+  watchAlert: (venue, pair) => `${pair}の${venue}の板が薄くなっています`,
+  watchSub:
+    'スプレッドが普段の何倍に開いているかを見ています。板が引かれた瞬間はここが跳ねます。',
+  watchLegend: '数字は普段（直近24時間の中央値）との比。普段どおりのときは出しません。',
+  watchUpdating: '自動更新中',
+  watchStopped: '更新が止まっています',
+  watchOpenPair: '金額別のコストを見る',
+  baselineLabel: '普段',
   description: (pair) =>
     `国内の暗号資産取引所の${pair}のスプレッドを1分ごとに実測して記録しています。同じ金額を買って売り戻したときに消える金額を、実測値で比べられます。`,
   amountLabel: '金額',
@@ -159,6 +178,17 @@ const EN: Messages = {
   heroPair: (pair) => `For ${pair}, the cheapest exchange depends on how much you buy`,
   heroSub:
     'Measured from the live order books of four Japanese exchanges, in the yen you actually lose.',
+  watchCalm: 'All quiet',
+  watchWatch: (venue, pair) => `${venue} is thinning out on ${pair}`,
+  watchAlert: (venue, pair) => `${venue}'s book has thinned out on ${pair}`,
+  watchSub:
+    'How far the spread has opened compared with a normal moment. When the book gets pulled, this is where it shows.',
+  watchLegend:
+    'The number is the ratio to a normal moment (24-hour median). Nothing is shown while things are normal.',
+  watchUpdating: 'updating',
+  watchStopped: 'updates have stopped',
+  watchOpenPair: 'See cost by size',
+  baselineLabel: 'normal',
   description: (pair) =>
     `We measure ${pair} spreads on Japanese crypto exchanges every minute and keep the record. Compare what a trade actually costs you, using measured numbers rather than published claims.`,
   amountLabel: 'Amount',

@@ -10,7 +10,7 @@
  */
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { bucketOf, rank, venueGapYen } from './spread.ts';
+import { bucketOf, rank, spreadBps, venueGapYen } from './spread.ts';
 import {
   cachedRead,
   DAILY_TTL_SECONDS,
@@ -26,14 +26,16 @@ import {
   homePath,
   pairPath,
   renderDailyPage,
-  renderIndex,
   renderNotFound,
   renderPairPage,
+  renderWatch,
 } from './render.ts';
 import { VENUE_IDS, VENUE_LABEL } from './venues.ts';
-import { AMOUNT_LADDER, parseLadder } from './depth.ts';
+import { levelOf, median, ratioOf, type VenuePulse } from './pulse.ts';
+import { parseLadder } from './depth.ts';
 import { bearerToken, collectOnce, tokenMatches } from './collect.ts';
 import {
+  bucketSeries,
   bucketsSince,
   dailyFor,
   daysWithData,
@@ -56,7 +58,7 @@ type Bindings = {
 };
 
 /** CSSとJSのキャッシュを確実に切り替えるための版。変更したら上げる。 */
-const ASSET_VERSION = '13';
+const ASSET_VERSION = '14';
 
 const DEFAULT_HISTORY_HOURS = 24;
 const MAX_HISTORY_HOURS = 24 * 14;
@@ -102,33 +104,20 @@ app.get('/', (c) => c.redirect(homePath(localeFromHeader(c.req.header('Accept-La
 app.get('/:locale{(ja|en)}/', async (c) => {
   const locale = c.req.param('locale') as Locale;
   const now = nowSeconds();
-  // 一覧はラダーの最初の段で比べる。ここで自由な金額を受けると、
-  // 板から出した実効コストが無い金額になってしまう。
-  const amountYen = AMOUNT_LADDER[0];
-
-  // 銘柄ページと同じ実効コストで並べる。ここだけ最良気配を出すと答えが食い違う。
-  const key = String(amountYen);
-  const rows = await Promise.all(
-    PAIRS.map(async (pair) => {
-      const depthRows = await readDepth(c, pair.id, now);
-      const costs = depthRows
-        .map((row) => ({ venue: row.venue, cost: parseLadder(row.costs)[key] ?? null }))
-        .filter((row): row is { venue: string; cost: number } => row.cost !== null);
-      if (costs.length === 0) return { pair, venue: null, costYen: null };
-
-      const best = costs.reduce((a, b) => (b.cost < a.cost ? b : a));
-      return { pair, venue: best.venue, costYen: best.cost };
-    }),
-  );
+  const pairs = await Promise.all(PAIRS.map((pair) => pulseFor(c, pair.id, now)));
 
   return html(
     c,
-    renderIndex({
+    renderWatch({
       locale,
       siteUrl: siteUrl(c),
       assetVersion: ASSET_VERSION,
-      rows,
-      amountYen,
+      now,
+      pairs: pairs.map((p, i) => ({
+        pair: PAIRS[i] as (typeof PAIRS)[number],
+        observedAt: p.observedAt,
+        venues: p.venues,
+      })),
     }),
   );
 });
@@ -271,6 +260,35 @@ app.get('/api/daily.json', async (c) => {
   });
 });
 
+/**
+ * 監視画面が定期的に読むもの。
+ *
+ * 画面を開きっぱなしにしてもらう前提なので、ここだけは頻度が高くなる。
+ * 最新値と基準（中央値）で作り直す間隔を分けてあり、
+ * 何人が開いていてもD1への読み取りは一定に収まる。
+ */
+app.get('/api/pulse.json', async (c) => {
+  const now = nowSeconds();
+  const pairs = await Promise.all(PAIRS.map((pair) => pulseFor(c, pair.id, now)));
+
+  return json(c, {
+    observed_at: Math.max(0, ...pairs.flatMap((p) => (p.observedAt ? [p.observedAt] : []))) || null,
+    pairs: pairs.map((p) => ({
+      pair: p.pair,
+      observed_at: p.observedAt,
+      venues: p.venues.map((v) => ({
+        venue: v.venue,
+        label: VENUE_LABEL[v.venue] ?? v.venue,
+        spread_bps: v.bps === null ? null : round(v.bps, 6),
+        baseline_bps: v.baselineBps === null ? null : round(v.baselineBps, 6),
+        ratio: v.ratio === null ? null : round(v.ratio, 2),
+        level: v.level,
+        spark: v.spark.map((n) => round(n, 4)),
+      })),
+    })),
+  });
+});
+
 /** 欠測を隠さないための確認用。運用の健全性はここで見る。 */
 app.get('/api/errors.json', async (c) => {
   const now = nowSeconds();
@@ -401,6 +419,53 @@ function readDepth(
     LATEST_TTL_SECONDS,
     () => latestDepth(c.env.DB, pair, VENUE_IDS),
   );
+}
+
+/** 監視画面1銘柄ぶん。基準は24時間、スパークラインは直近6時間。 */
+const BASELINE_HOURS = 24;
+const SPARK_POINTS = 36;
+
+async function pulseFor(
+  c: Context<{ Bindings: Bindings }>,
+  pair: PairId,
+  now: number,
+): Promise<{ pair: PairId; observedAt: number | null; venues: VenuePulse[] }> {
+  const ticks = await readLatest(c, pair, now);
+  const series = await cachedRead(
+    versionedKey(`series:${pair}`, now, HISTORY_TTL_SECONDS),
+    waitUntil(c),
+    HISTORY_TTL_SECONDS,
+    () => bucketSeries(c.env.DB, pair, now - BASELINE_HOURS * 3600),
+  );
+
+  const byVenue = new Map<string, number[]>();
+  for (const row of series) {
+    const list = byVenue.get(row.venue) ?? [];
+    list.push(row.avg_bps);
+    byVenue.set(row.venue, list);
+  }
+
+  const venues: VenuePulse[] = VENUE_IDS.map((venue) => {
+    const tick = ticks.find((t) => t.venue === venue);
+    const bps = tick ? spreadBps(tick.bid, tick.ask) : null;
+    const history = byVenue.get(venue) ?? [];
+    const baselineBps = median(history);
+    const ratio = ratioOf(bps, baselineBps);
+    return {
+      venue,
+      bps,
+      baselineBps,
+      ratio,
+      level: levelOf(ratio),
+      spark: history.slice(-SPARK_POINTS),
+    };
+  });
+
+  return {
+    pair,
+    observedAt: ticks.length > 0 ? Math.max(...ticks.map((t) => t.ts)) : null,
+    venues,
+  };
 }
 
 function readDays(

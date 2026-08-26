@@ -14,9 +14,10 @@ import {
   isStale,
   pairPath,
   renderDailyPage,
-  renderIndex,
   renderNotFound,
   renderPairPage,
+  renderWatch,
+  sparkline,
 } from '../src/render.ts';
 import { rank } from '../src/spread.ts';
 import { PAIRS } from '../src/pairs.ts';
@@ -285,22 +286,52 @@ test('英語ページの見出しも英語になる', () => {
 });
 
 
-test('一覧ページは銘柄ページと同じ実効コストで並べる', () => {
-  const html = renderIndex({
+
+const pulseRow = (venue, ratio, level, bps = 1) => ({
+  venue, bps, baselineBps: 1, ratio, level, spark: [1, 2, 1, 3, 1, 2],
+});
+
+const watch = (venues) =>
+  renderWatch({
     ...BASE,
     locale: 'ja',
-    amountYen: 100_000,
-    rows: [
-      { pair: PAIRS[0], venue: 'bitbank', costYen: 9.73 },
-      { pair: PAIRS[1], venue: null, costYen: null },
-    ],
+    now: 1_787_667_100,
+    pairs: [{ pair: PAIRS[0], observedAt: 1_787_667_040, venues }],
   });
-  assert.match(html, /9.73円/);
-  assert.match(html, /bitbank/);
-  // データが無い銘柄は数字を出さない
-  assert.match(html, /観測データがまだありません/);
-  // 見出しの主張と一覧が食い違わないよう、金額で変わることを添える
-  assert.match(html, /金額を上げると順位は入れ替わります/);
-  // 販売所の注意は一覧にも出す
-  assert.match(html, /notice--warn/);
+
+test('監視画面: 静かなときは倍率を出さない', () => {
+  const html = watch([pulseRow('gmo', 1.1, 'calm'), pulseRow('bitbank', 0.9, 'calm')]);
+  assert.match(html, /いまは静かです/);
+  assert.doesNotMatch(html, /watch__ratio/);
+  assert.match(html, /data-level="calm"/);
+});
+
+test('監視画面: 荒れている行だけ倍率を出す', () => {
+  const html = watch([pulseRow('gmo', 6.2, 'alert'), pulseRow('bitbank', 1.0, 'calm')]);
+  assert.match(html, /板が薄くなっています/);
+  assert.match(html, /6.2倍/);
+  assert.equal((html.match(/watch__ratio/g) || []).length, 1, '静かな行にも倍率が出ている');
+  assert.match(html, /data-level="alert"/);
+});
+
+test('監視画面: いちばん開いている取引所を見出しに出す', () => {
+  const html = watch([pulseRow('gmo', 2.2, 'watch'), pulseRow('bitflyer', 8.0, 'alert')]);
+  assert.match(html, /bitFlyer/);
+  assert.doesNotMatch(html.split('hero__sub')[0], /GMOコイン/);
+});
+
+test('スパークライン: 2点未満なら描かない', () => {
+  assert.equal(sparkline([]), '');
+  assert.equal(sparkline([1]), '');
+  assert.match(sparkline([1, 2, 3]), /<svg[^>]*><path d="M/);
+});
+
+test('スパークライン: 値が全部同じでも壊れない', () => {
+  const svg = sparkline([2, 2, 2, 2]);
+  assert.match(svg, /<path/);
+  assert.doesNotMatch(svg, /NaN|Infinity/);
+});
+
+test('監視画面: 銘柄ページへの導線がある', () => {
+  assert.match(watch([pulseRow('gmo', 1, 'calm')]), /\/ja\/btc\//);
 });
