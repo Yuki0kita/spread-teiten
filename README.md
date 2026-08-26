@@ -235,6 +235,23 @@ curl -X POST -H "Authorization: Bearer $COLLECT_TOKEN" \
 
 Cronの設定は消していない。Cloudflare側が直れば1分間隔に戻せる。そのときはサイトの文言も戻す。
 
+## アクセスの集計
+
+外部の解析サービスは入れていない。CSPを緩めることになり、Cookieも増える。
+「自分で測る」ことを売りにしているサイトなので、解析も自分で測る（[src/visits.ts](src/visits.ts)）。
+
+記録するのは**日付・パス・リファラのホスト名・国**だけ。IPもCookieもUser-Agentも保存しない。
+リファラをホスト名に切り詰めているのは、URL全体には他所のサイトのクエリが付いていることがあり、
+そこに個人情報が混ざっている場合があるため。
+
+APIと静的ファイルは数えない。監視画面は60秒ごとに `/api/pulse.json` を叩くので、
+数えてしまうと「人が来た数」が分からなくなる。
+
+```bash
+curl -H "Authorization: Bearer $(cat .collect-token)" \
+  https://spread-teiten.teiten.workers.dev/internal/visits.json
+```
+
 ## D1の読み取り予算
 
 このサイトはJSONを誰でも叩けるようにしてあるので、素直に作るとアクセスがそのままD1の読み取りになる。

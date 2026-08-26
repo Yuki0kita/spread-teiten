@@ -10,7 +10,7 @@
  */
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { bucketOf, rank, spreadBps, venueGapYen } from './spread.ts';
+import { bucketOf, jstDay, rank, spreadBps, venueGapYen } from './spread.ts';
 import {
   cachedRead,
   DAILY_TTL_SECONDS,
@@ -32,6 +32,7 @@ import {
 } from './render.ts';
 import { VENUE_IDS, VENUE_LABEL } from './venues.ts';
 import { levelOf, median, ratioOf, type VenuePulse } from './pulse.ts';
+import { isCountable, normalizePath, recordVisit, referrerHost } from './visits.ts';
 import { parseLadder } from './depth.ts';
 import { bearerToken, collectOnce, tokenMatches } from './collect.ts';
 import {
@@ -77,6 +78,20 @@ const app = new Hono<{ Bindings: Bindings }>();
  */
 app.use('*', async (c, next) => {
   await next();
+
+  // 画面が表示されたことだけを数える。応答は待たせない。
+  if (isCountable(c.req.path, c.req.method) && c.res.status === 200) {
+    const url = new URL(c.req.url);
+    c.executionCtx.waitUntil(
+      recordVisit(c.env.DB, {
+        day: jstDay(nowSeconds()),
+        path: normalizePath(c.req.path),
+        referrer: referrerHost(c.req.header('Referer'), url.hostname),
+        country: (c.req.raw as { cf?: { country?: string } }).cf?.country ?? 'unknown',
+      }),
+    );
+  }
+
   c.header('X-Content-Type-Options', 'nosniff');
   c.header('X-Frame-Options', 'DENY');
   c.header('Referrer-Policy', 'strict-origin-when-cross-origin');
@@ -363,6 +378,25 @@ app.post('/internal/collect', async (c) => {
 
   const result = await collectOnce(c.env.DB, Date.now());
   return c.json(result, 200, { 'Cache-Control': 'no-store' });
+});
+
+/**
+ * アクセスの集計。個人は特定できないが、事業の数字なのでトークンで守る。
+ *
+ *   curl -H "Authorization: Bearer $(cat .collect-token)" .../internal/visits.json
+ */
+app.get('/internal/visits.json', async (c) => {
+  if (!tokenMatches(bearerToken(c.req.header('Authorization')), c.env.COLLECT_TOKEN ?? '')) {
+    return notFound(c, DEFAULT_LOCALE);
+  }
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT day, path, referrer, country, count FROM visits
+     ORDER BY day DESC, count DESC LIMIT 500`,
+  ).all<{ day: string; path: string; referrer: string; country: string; count: number }>();
+
+  const total = results.reduce((sum, row) => sum + row.count, 0);
+  return c.json({ total, rows: results }, 200, { 'Cache-Control': 'no-store' });
 });
 
 app.notFound((c) => notFound(c, localeFromPath(c.req.path)));
