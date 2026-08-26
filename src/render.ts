@@ -125,12 +125,31 @@ function withCode(locale: Locale, name: string, code: string): string {
   return locale === 'ja' ? `${name}（${code}）` : `${name} (${code})`;
 }
 
+/**
+ * ヘッダーはサイト名と鮮度だけ。h1はここでは使わない。
+ *
+ * h1はページごとの主題に使う。全ページのh1がサイト名だと、
+ * 検索エンジンにも読み手にも「このページが何の話か」が伝わらない。
+ */
 function header(locale: Locale, meta: string, homeHref: string): string {
   const messages = t(locale);
   return `<header class="head">
-  <h1><a href="${esc(homeHref)}">${esc(messages.siteName)}</a></h1>
+  <p class="head__brand"><a href="${esc(homeHref)}">${esc(messages.siteName)}</a></p>
   <p class="head__meta">${meta}</p>
 </header>`;
+}
+
+/**
+ * このサイトが何を解決するのかを、数字より先に1行で言う。
+ *
+ * 「スプレッドを比べられます」では、なぜ他の比較表ではだめなのかが伝わらない。
+ * 金額で答えが変わることこそがこのサイトの中身なので、そこを見出しにする。
+ */
+function hero(headline: string, sub: string): string {
+  return `<section class="hero">
+    <h1 class="hero__line">${esc(headline)}</h1>
+    <p class="hero__sub">${esc(sub)}</p>
+  </section>`;
 }
 
 /* 銘柄の一覧 --------------------------------------------------------- */
@@ -139,8 +158,12 @@ export type IndexData = {
   locale: Locale;
   siteUrl: string;
   assetVersion: string;
-  /** 銘柄ごとの、いちばん狭い取引所とその往復コスト。 */
-  rows: { pair: Pair; best: Ranked | null }[];
+  /**
+   * 銘柄ごとの、いちばん安い取引所とその往復コスト。
+   * 銘柄ページと同じく、板を食い進んで出した実効コストを使う。
+   * ここだけ最良気配の数字を出すと、ページによって答えが変わってしまう。
+   */
+  rows: { pair: Pair; venue: string | null; costYen: number | null }[];
   amountYen: number;
 };
 
@@ -149,12 +172,13 @@ export function renderIndex(data: IndexData): string {
   const messages = t(locale);
 
   const items = rows
-    .map(({ pair, best }) => {
+    .map(({ pair, venue, costYen }) => {
       const name = pairName(locale, pair);
-      const detail = best
-        ? `<span class="rank__cost">${esc(formatYen(best.costYen))}</span>
-           <span class="rank__pct">${esc(VENUE_LABEL[best.venue] ?? best.venue)}</span>`
-        : `<span class="rank__pct">${esc(messages.noData)}</span>`;
+      const detail =
+        venue !== null && costYen !== null
+          ? `<span class="rank__cost">${esc(formatYen(costYen))}</span>
+           <span class="rank__pct">${esc(VENUE_LABEL[venue] ?? venue)}</span>`
+          : `<span class="rank__pct">${esc(messages.noData)}</span>`;
       return `<li class="rank__item">
         <span class="rank__venue"><a href="${esc(pairPath(locale, pair.id))}">${esc(withCode(locale, name, pair.code))}</a></span>
         ${detail}
@@ -171,12 +195,16 @@ export function renderIndex(data: IndexData): string {
     pathFor: (l) => homePath(l),
     body: `${header(locale, esc(messages.tagline), homePath(locale))}
 <main>
+  ${hero(messages.heroIndex, messages.heroSub)}
+
   <section class="section">
     <h2 class="section__title">${esc(messages.pairsTitle)}</h2>
     <p class="lede__text">${esc(messages.indexLede(formatYen(amountYen)))}</p>
     <ol class="rank">
       ${items}
     </ol>
+    <p class="rank__note">${esc(messages.indexNote)}</p>
+    ${renderDealerWarning(locale)}
   </section>
 
   <section class="section">
@@ -239,6 +267,7 @@ export function renderPairPage(data: PairPageData): string {
     withScript: true,
     body: `${header(locale, meta, homePath(locale))}
 <main data-pair="${esc(pair.id)}">
+  ${hero(messages.heroPair(name), messages.heroSub)}
   ${stale ? `<p class="notice">${esc(messages.staleNotice(Math.floor((now - (observedAt as number)) / 60), formatTime(observedAt as number, locale)))}</p>` : ''}
 
   ${renderDepth(locale, data.depth)}
@@ -456,8 +485,8 @@ export function renderDailyPage(data: DailyPageData): string {
     body: `${header(locale, esc(day), homePath(locale))}
 <main>
   <section class="section">
-    <h2 class="section__title">${esc(messages.dailyTitle)}</h2>
-    <p class="lede__text">${esc(messages.dailyIntro(name, day))}</p>
+    <h1 class="hero__line hero__line--small">${esc(messages.dailyIntro(name, day))}</h1>
+    <p class="section__title">${esc(messages.dailyTitle)}</p>
     ${
       rows.length === 0
         ? `<p class="empty">${esc(messages.dailyNone)}</p>`
@@ -509,7 +538,7 @@ export function renderNotFound(
     body: `${header(locale, '', homePath(locale))}
 <main>
   <section class="section">
-    <p class="empty__title">${esc(heading)}</p>
+    <h1 class="empty__title">${esc(heading)}</h1>
     <p class="empty__note">${esc(detail)}</p>
     <p class="empty__note"><a href="${esc(homePath(locale))}">${esc(messages.backHome)}</a></p>
   </section>

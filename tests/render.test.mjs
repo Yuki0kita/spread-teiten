@@ -14,6 +14,7 @@ import {
   isStale,
   pairPath,
   renderDailyPage,
+  renderIndex,
   renderNotFound,
   renderPairPage,
 } from '../src/render.ts';
@@ -255,4 +256,51 @@ test('販売所の注意に、実測していない数値を書かない', () =>
   assert.doesNotMatch(lead, /[0-9,]+\s*円/);
   assert.doesNotMatch(lead, /[0-9]+\s*倍/);
   assert.match(html, /板の値段だけ/);
+});
+
+
+test('h1はページごとに違い、サイト名ではない', () => {
+  const h1 = (html) => /<h1[^>]*>([^<]*)<\/h1>/.exec(html)?.[1] ?? '';
+
+  const btc = h1(pairPage());
+  const eth = h1(pairPage({ pair: PAIRS[1] }));
+  assert.match(btc, /いくら買うかで安い取引所が変わります/);
+  assert.notEqual(btc, eth, '銘柄が違えばh1も違うこと');
+  assert.doesNotMatch(btc, /^スプレッド定点$/);
+
+  // h1はページに1つだけ
+  assert.equal((pairPage().match(/<h1/g) || []).length, 1);
+});
+
+test('解決することを、数字より先に置く', () => {
+  const html = pairPage();
+  const heroAt = html.indexOf('hero__line');
+  const tableAt = html.indexOf('金額別の実効コスト');
+  assert.ok(heroAt >= 0 && heroAt < tableAt, '見出しが表より後ろにある');
+});
+
+test('英語ページの見出しも英語になる', () => {
+  const html = pairPage({ locale: 'en' });
+  assert.match(html, /the cheapest exchange depends on how much you buy/i);
+});
+
+
+test('一覧ページは銘柄ページと同じ実効コストで並べる', () => {
+  const html = renderIndex({
+    ...BASE,
+    locale: 'ja',
+    amountYen: 100_000,
+    rows: [
+      { pair: PAIRS[0], venue: 'bitbank', costYen: 9.73 },
+      { pair: PAIRS[1], venue: null, costYen: null },
+    ],
+  });
+  assert.match(html, /9.73円/);
+  assert.match(html, /bitbank/);
+  // データが無い銘柄は数字を出さない
+  assert.match(html, /観測データがまだありません/);
+  // 見出しの主張と一覧が食い違わないよう、金額で変わることを添える
+  assert.match(html, /金額を上げると順位は入れ替わります/);
+  // 販売所の注意は一覧にも出す
+  assert.match(html, /notice--warn/);
 });

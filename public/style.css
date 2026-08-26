@@ -68,13 +68,43 @@ a { color: var(--color-accent); }
   padding: var(--space-5) 0 var(--space-4);
 }
 
-h1 { margin: 0; font-size: 1.25rem; letter-spacing: 0.04em; }
+.head__brand {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.head__brand a { color: inherit; text-decoration: none; }
 
 .head__meta {
   margin: 0;
   color: var(--color-text-muted);
   font-size: 0.8125rem;
   font-variant-numeric: tabular-nums;
+}
+
+/* このサイトが何を解決するのか。数字より先に読ませる。 */
+.hero {
+  margin: 0 0 var(--space-5);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.hero__line {
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1.45;
+  letter-spacing: 0.01em;
+}
+
+.hero__line--small { font-size: 1.25rem; margin-bottom: var(--space-3); }
+
+.hero__sub {
+  margin: var(--space-3) 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.9375rem;
 }
 
 .section { margin-bottom: var(--space-5); }
@@ -349,6 +379,8 @@ h1 { margin: 0; font-size: 1.25rem; letter-spacing: 0.04em; }
 
 @media (max-width: 600px) {
   .head { padding-top: var(--space-4); }
+  .hero__line { font-size: 1.375rem; }
+  .hero__line--small { font-size: 1.125rem; }
   .rank__item { padding-inline: var(--space-3); grid-template-columns: 1fr auto 4.8em; }
   .rank__cost { font-size: 1.125rem; }
 }

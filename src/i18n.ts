@@ -30,6 +30,9 @@ export function localeFromHeader(header: string | undefined): Locale {
 type Messages = {
   siteName: string;
   tagline: string;
+  heroIndex: string;
+  heroPair: (pairName: string) => string;
+  heroSub: string;
   description: (pairName: string) => string;
   amountLabel: string;
   amountUnit: string;
@@ -59,6 +62,7 @@ type Messages = {
   bestQuoteNote: string;
   pairsTitle: string;
   indexLede: (amount: string) => string;
+  indexNote: string;
   dailyTitle: string;
   dailyIntro: (pairName: string, date: string) => string;
   dailyColumns: { venue: string; avg: string; min: string; max: string; samples: string };
@@ -81,6 +85,9 @@ type Messages = {
 const JA: Messages = {
   siteName: 'スプレッド定点',
   tagline: '国内取引所のスプレッドを実測して記録',
+  heroIndex: 'いくら買うかで、いちばん安い取引所は変わります',
+  heroPair: (pair) => `${pair}は、いくら買うかで安い取引所が変わります`,
+  heroSub: '国内4取引所の板を実測して、実際に消える金額で比べています。',
   description: (pair) =>
     `国内の暗号資産取引所の${pair}のスプレッドを1分ごとに実測して記録しています。同じ金額を買って売り戻したときに消える金額を、実測値で比べられます。`,
   amountLabel: '金額',
@@ -125,6 +132,7 @@ const JA: Messages = {
     'これは板の先頭に並んでいる、ごくわずかな量だけで買えたと仮定した数字です。実際に買える金額では上の表のようになります。下のグラフはこの数字の推移です。',
   pairsTitle: '銘柄',
   indexLede: (amount) => `${amount}を買ってすぐ売り戻したとき、いちばん損が小さい取引所と金額です。`,
+  indexNote: '金額を上げると順位は入れ替わります。銘柄をひらくと金額別の表が出ます。',
   dailyTitle: '日別の記録',
   dailyIntro: (pair, date) => `${date}に観測した${pair}のスプレッドです。`,
   dailyColumns: { venue: '取引所', avg: '平均', min: '最小', max: '最大', samples: '観測数' },
@@ -147,6 +155,10 @@ const JA: Messages = {
 const EN: Messages = {
   siteName: 'Spread Teiten',
   tagline: 'Measured spreads on Japanese crypto exchanges',
+  heroIndex: 'The cheapest exchange depends on how much you buy',
+  heroPair: (pair) => `For ${pair}, the cheapest exchange depends on how much you buy`,
+  heroSub:
+    'Measured from the live order books of four Japanese exchanges, in the yen you actually lose.',
   description: (pair) =>
     `We measure ${pair} spreads on Japanese crypto exchanges every minute and keep the record. Compare what a trade actually costs you, using measured numbers rather than published claims.`,
   amountLabel: 'Amount',
@@ -190,6 +202,7 @@ const EN: Messages = {
     'This assumes you fill against the tiny amount sitting at the very front of the book. For sizes you would actually trade, see the table above. The chart below tracks this number over time.',
   pairsTitle: 'Assets',
   indexLede: (amount) => `The cheapest exchange, and what it costs, if you buy ${amount} and sell it straight back.`,
+  indexNote: 'The order changes at larger sizes. Open an asset to see the full table.',
   dailyTitle: 'Daily record',
   dailyIntro: (pair, date) => `${pair} spreads observed on ${date}.`,
   dailyColumns: { venue: 'Exchange', avg: 'Average', min: 'Lowest', max: 'Highest', samples: 'Samples' },

@@ -31,7 +31,7 @@ import {
   renderPairPage,
 } from './render.ts';
 import { VENUE_IDS, VENUE_LABEL } from './venues.ts';
-import { parseLadder } from './depth.ts';
+import { AMOUNT_LADDER, parseLadder } from './depth.ts';
 import { bearerToken, collectOnce, tokenMatches } from './collect.ts';
 import {
   bucketsSince,
@@ -56,7 +56,7 @@ type Bindings = {
 };
 
 /** CSSとJSのキャッシュを確実に切り替えるための版。変更したら上げる。 */
-const ASSET_VERSION = '11';
+const ASSET_VERSION = '13';
 
 const DEFAULT_HISTORY_HOURS = 24;
 const MAX_HISTORY_HOURS = 24 * 14;
@@ -102,13 +102,22 @@ app.get('/', (c) => c.redirect(homePath(localeFromHeader(c.req.header('Accept-La
 app.get('/:locale{(ja|en)}/', async (c) => {
   const locale = c.req.param('locale') as Locale;
   const now = nowSeconds();
-  const amountYen = clampAmount(c.req.query('amount'));
+  // 一覧はラダーの最初の段で比べる。ここで自由な金額を受けると、
+  // 板から出した実効コストが無い金額になってしまう。
+  const amountYen = AMOUNT_LADDER[0];
 
+  // 銘柄ページと同じ実効コストで並べる。ここだけ最良気配を出すと答えが食い違う。
+  const key = String(amountYen);
   const rows = await Promise.all(
     PAIRS.map(async (pair) => {
-      const ticks = await readLatest(c, pair.id, now);
-      const ranked = rank(ticks, amountYen);
-      return { pair, best: ranked[0] ?? null };
+      const depthRows = await readDepth(c, pair.id, now);
+      const costs = depthRows
+        .map((row) => ({ venue: row.venue, cost: parseLadder(row.costs)[key] ?? null }))
+        .filter((row): row is { venue: string; cost: number } => row.cost !== null);
+      if (costs.length === 0) return { pair, venue: null, costYen: null };
+
+      const best = costs.reduce((a, b) => (b.cost < a.cost ? b : a));
+      return { pair, venue: best.venue, costYen: best.cost };
     }),
   );
 
