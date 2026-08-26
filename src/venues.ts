@@ -8,6 +8,7 @@
  * 「URLの組み立て」と「解釈」を分けて、解釈のほうだけをテストできるようにしている。
  */
 import { isPlausible, type Quote } from './spread.ts';
+import type { Book, Level } from './depth.ts';
 import type { PairId } from './pairs.ts';
 
 export type VenueId = 'gmo' | 'bitbank' | 'bitflyer' | 'coincheck';
@@ -19,6 +20,10 @@ export type Venue = {
   url: (pair: PairId) => string;
   /** レスポンスから買値・売値を取り出す。取れなければ例外。 */
   parse: (payload: unknown) => { bid: number; ask: number };
+  /** 板の深さを返す公開APIエンドポイント。 */
+  bookUrl: (pair: PairId) => string;
+  /** 板のレスポンスを共通の形にそろえる。 */
+  parseBook: (payload: unknown) => Book;
 };
 
 export class VenueError extends Error {}
@@ -43,24 +48,34 @@ export const VENUES: readonly Venue[] = [
     label: 'GMOコイン',
     url: (pair) => `https://api.coin.z.com/public/v1/ticker?symbol=${SYMBOL[pair].upper}`,
     parse: parseGmo,
+    bookUrl: (pair) => `https://api.coin.z.com/public/v1/orderbooks?symbol=${SYMBOL[pair].upper}`,
+    parseBook: parseGmoBook,
   },
   {
     id: 'bitbank',
     label: 'bitbank',
     url: (pair) => `https://public.bitbank.cc/${SYMBOL[pair].lowerJpy}/ticker`,
     parse: parseBitbank,
+    bookUrl: (pair) => `https://public.bitbank.cc/${SYMBOL[pair].lowerJpy}/depth`,
+    parseBook: parseBitbankBook,
   },
   {
     id: 'bitflyer',
     label: 'bitFlyer',
     url: (pair) => `https://api.bitflyer.com/v1/ticker?product_code=${SYMBOL[pair].upperJpy}`,
     parse: parseBitflyer,
+    bookUrl: (pair) => `https://api.bitflyer.com/v1/getboard?product_code=${SYMBOL[pair].upperJpy}`,
+    parseBook: parseBitflyerBook,
   },
   {
     id: 'coincheck',
     label: 'Coincheck',
     url: (pair) => `https://coincheck.com/api/ticker?pair=${SYMBOL[pair].lowerJpy}`,
     parse: parseCoincheck,
+    // Coincheckの板はBTC/JPYのみ。他の銘柄はpairを付けても同じものが返るため、
+    // 銘柄ごとに取り違えないよう明示的に指定する。
+    bookUrl: (pair) => `https://coincheck.com/api/order_books?pair=${SYMBOL[pair].lowerJpy}`,
+    parseBook: parseCoinCheckBook,
   },
 ];
 
@@ -113,6 +128,98 @@ export function parseBitflyer(payload: unknown): { bid: number; ask: number } {
 export function parseCoincheck(payload: unknown): { bid: number; ask: number } {
   const root = asObject(payload, 'Coincheck');
   return { bid: toNumber(root['bid'], 'Coincheck'), ask: toNumber(root['ask'], 'Coincheck') };
+}
+
+/* 板の解釈 ----------------------------------------------------------- */
+
+/** [値段, 数量] の配列に直す。数値として読めない段は捨てる。 */
+function toLevels(rows: unknown, who: string): Level[] {
+  if (!Array.isArray(rows)) throw new VenueError(`${who}の板が配列ではありません。`);
+  const levels: Level[] = [];
+  for (const row of rows) {
+    let price: unknown;
+    let size: unknown;
+    if (Array.isArray(row)) {
+      [price, size] = row;
+    } else if (typeof row === 'object' && row !== null) {
+      const record = row as Record<string, unknown>;
+      price = record['price'];
+      size = record['size'];
+    } else {
+      continue;
+    }
+    const p = Number(price);
+    const s = Number(size);
+    if (Number.isFinite(p) && Number.isFinite(s) && p > 0 && s > 0) levels.push([p, s]);
+  }
+  if (levels.length === 0) throw new VenueError(`${who}の板が空です。`);
+  return levels;
+}
+
+/** 板の並びを保証する。asksは安い順、bidsは高い順でないと食い進む計算が狂う。 */
+function orderBook(asks: Level[], bids: Level[]): Book {
+  return {
+    asks: [...asks].sort((a, b) => a[0] - b[0]),
+    bids: [...bids].sort((a, b) => b[0] - a[0]),
+  };
+}
+
+export function parseGmoBook(payload: unknown): Book {
+  const root = asObject(payload, 'GMOコイン');
+  const data = asObject(root['data'], 'GMOコイン');
+  return orderBook(toLevels(data['asks'], 'GMOコイン'), toLevels(data['bids'], 'GMOコイン'));
+}
+
+export function parseBitbankBook(payload: unknown): Book {
+  const root = asObject(payload, 'bitbank');
+  const data = asObject(root['data'], 'bitbank');
+  return orderBook(toLevels(data['asks'], 'bitbank'), toLevels(data['bids'], 'bitbank'));
+}
+
+export function parseBitflyerBook(payload: unknown): Book {
+  const root = asObject(payload, 'bitFlyer');
+  return orderBook(toLevels(root['asks'], 'bitFlyer'), toLevels(root['bids'], 'bitFlyer'));
+}
+
+export function parseCoinCheckBook(payload: unknown): Book {
+  const root = asObject(payload, 'Coincheck');
+  return orderBook(toLevels(root['asks'], 'Coincheck'), toLevels(root['bids'], 'Coincheck'));
+}
+
+/**
+ * 1銘柄について全取引所の板を同時に取る。
+ *
+ * 板は数十KBあるので、毎分すべての銘柄を取ると重い。呼び出す側で銘柄を回して、
+ * 1回の実行では1銘柄だけにする。4取引所は同時に取る（同じ瞬間の板であることが前提）。
+ */
+export async function fetchBooks(
+  pair: PairId,
+  timeoutMs = 10_000,
+): Promise<{ books: { venue: VenueId; book: Book }[]; errors: { venue: VenueId; message: string }[] }> {
+  type BookResult = { venue: VenueId; book: Book } | { venue: VenueId; message: string };
+
+  const results: BookResult[] = await Promise.all(
+    VENUES.map(async (venue): Promise<BookResult> => {
+      try {
+        const response = await fetch(venue.bookUrl(pair), {
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+        if (!response.ok) throw new VenueError(`HTTP ${response.status}`);
+        return { venue: venue.id, book: venue.parseBook(await response.json()) };
+      } catch (error) {
+        return { venue: venue.id, message: messageOf(error) };
+      }
+    }),
+  );
+
+  const books: { venue: VenueId; book: Book }[] = [];
+  const errors: { venue: VenueId; message: string }[] = [];
+  for (const result of results) {
+    if ('message' in result) errors.push(result);
+    else books.push(result);
+  }
+  return { books, errors };
 }
 
 /**

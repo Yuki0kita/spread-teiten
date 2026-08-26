@@ -89,6 +89,7 @@ h1 { margin: 0; font-size: 1.25rem; letter-spacing: 0.04em; }
 .lede { margin-bottom: var(--space-4); }
 
 .amount {
+  margin-bottom: var(--space-2);
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -243,6 +244,23 @@ h1 { margin: 0; font-size: 1.25rem; letter-spacing: 0.04em; }
 .chart .series-label--2 { fill: var(--series-2); }
 .chart .series-label--3 { fill: var(--series-3); }
 .chart .series-label--4 { fill: var(--series-4); }
+
+/* 金額別の実効コスト表 -------------------------------------- */
+
+.table--matrix th[scope="row"] {
+  font-weight: 500;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+/* 行ごとの最安。色を足さず、地の色と太さだけで示す。 */
+.cell--best {
+  background: var(--color-accent-weak);
+  color: var(--color-accent);
+  font-weight: 700;
+}
+
+.table td.muted { color: var(--color-text-muted); font-size: 0.8125rem; }
 
 /* 日別リンクと前後のページ送り ------------------------------ */
 

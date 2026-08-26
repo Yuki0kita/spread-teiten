@@ -10,9 +10,11 @@
  * INSERT OR REPLACE なので、行が増えずに上書きされる）。
  */
 import { PAIR_IDS, type PairId } from './pairs.ts';
-import { fetchPair } from './venues.ts';
+import { costLadder } from './depth.ts';
+import { fetchBooks, fetchPair } from './venues.ts';
 import {
   hasTicksAt,
+  insertDepth,
   insertErrors,
   insertTicks,
   pruneTicks,
@@ -63,8 +65,30 @@ export async function collectOnce(db: D1Database, atMs: number): Promise<Collect
     for (const error of errors) failed.push(`${pair}/${error.venue}`);
   }
 
+  await collectDepth(db, ts, failed);
   await rollUp(db, ts);
   return { ts, collected, failed };
+}
+
+/**
+ * 板の深さから実効コストを出す。1回の実行では1銘柄だけ。
+ *
+ * 板は1銘柄あたり合計150KBほどあるので、毎回すべての銘柄を取ると重い。
+ * 銘柄を順に回して、それぞれ数分に1回ずつ更新する。
+ * 同じ銘柄の4取引所は同時に取る。別の瞬間の板を並べると比較にならないため。
+ */
+async function collectDepth(db: D1Database, ts: number, failed: string[]): Promise<void> {
+  const pair = PAIR_IDS[Math.floor(ts / 60) % PAIR_IDS.length] as PairId;
+  const { books, errors } = await fetchBooks(pair);
+
+  await insertDepth(
+    db,
+    pair,
+    ts,
+    books.map(({ venue, book }) => ({ venue, costs: JSON.stringify(costLadder(book)) })),
+  );
+
+  for (const error of errors) failed.push(`${pair}/${error.venue}/board`);
 }
 
 /**

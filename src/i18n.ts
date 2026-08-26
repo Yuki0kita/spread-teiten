@@ -46,6 +46,15 @@ type Messages = {
   chartFailed: string;
   aboutTitle: string;
   about: string[];
+  depthTitle: string;
+  depthLede: string;
+  depthAmount: string;
+  depthNotEnough: string;
+  depthNone: string;
+  depthInsight: (small: string, large: string) => string;
+  depthSameVenue: (venue: string) => string;
+  bestQuoteTitle: string;
+  bestQuoteNote: string;
   pairsTitle: string;
   indexLede: (amount: string) => string;
   dailyTitle: string;
@@ -97,6 +106,18 @@ const JA: Messages = {
     'スプレッドは秒単位で変わります。ここにあるのは観測した瞬間の値で、いま注文して同じ値で約定することを保証するものではありません。',
     '特定の取引所をすすめるものでも、投資判断を助言するものでもありません。',
   ],
+  depthTitle: '金額別の実効コスト',
+  depthLede:
+    '板に並んでいる注文を上から食べていったときに、実際に消える金額です。板の一番上の値段だけでは分かりません。',
+  depthAmount: '買う金額',
+  depthNotEnough: '板不足',
+  depthNone: 'まだ板を観測できていません。',
+  depthInsight: (small, large) =>
+    `金額によって答えが変わります。少額なら${small}、大口なら${large}がいちばん安く済みます。`,
+  depthSameVenue: (venue) => `どの金額でも${venue}がいちばん安く済みます。`,
+  bestQuoteTitle: '板の一番上だけを見た場合',
+  bestQuoteNote:
+    'これは板の先頭に並んでいる、ごくわずかな量だけで買えたと仮定した数字です。実際に買える金額では上の表のようになります。下のグラフはこの数字の推移です。',
   pairsTitle: '銘柄',
   indexLede: (amount) => `${amount}を買ってすぐ売り戻したとき、いちばん損が小さい取引所と金額です。`,
   dailyTitle: '日別の記録',
@@ -147,6 +168,18 @@ const EN: Messages = {
     'Spreads move by the second. These are the values at the moment of observation and are no guarantee of the price you will get.',
     'This is not a recommendation of any exchange, nor investment advice.',
   ],
+  depthTitle: 'What it really costs, by size',
+  depthLede:
+    'What actually disappears once you eat through the orders sitting on the book. The top quote alone does not tell you this.',
+  depthAmount: 'Order size',
+  depthNotEnough: 'book too thin',
+  depthNone: 'No order book observations yet.',
+  depthInsight: (small, large) =>
+    `The answer depends on size. ${small} is cheapest for small orders, ${large} for large ones.`,
+  depthSameVenue: (venue) => `${venue} is cheapest at every size.`,
+  bestQuoteTitle: 'Top of book only',
+  bestQuoteNote:
+    'This assumes you fill against the tiny amount sitting at the very front of the book. For sizes you would actually trade, see the table above. The chart below tracks this number over time.',
   pairsTitle: 'Assets',
   indexLede: (amount) => `The cheapest exchange, and what it costs, if you buy ${amount} and sell it straight back.`,
   dailyTitle: 'Daily record',

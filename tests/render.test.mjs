@@ -91,6 +91,7 @@ const pairPage = (overrides = {}) =>
     observedAt: 1_787_667_040,
     now: 1_787_667_100,
     recentDays: ['2026-08-26', '2026-08-25'],
+    depth: [],
     ...overrides,
   });
 
@@ -183,4 +184,47 @@ test('renderDailyPage: 記録を表にして、金額に直した結論を添え
   assert.match(html, /GMOコイン/);
   assert.match(html, /この日いちばん狭かったのは GMOコイン/);
   assert.match(html, /\/ja\/btc\/2026-08-25\//);
+});
+
+
+test('renderPairPage: 金額別の実効コスト表が出て、行ごとの最安が強調される', () => {
+  const html = pairPage({
+    depth: [
+      { venue: 'gmo', costs: { '100000': 29, '300000': 120, '1000000': 519, '3000000': 2600, '10000000': 12000 } },
+      { venue: 'bitbank', costs: { '100000': 5, '300000': 30, '1000000': 134, '3000000': 900, '10000000': 5200 } },
+      { venue: 'coincheck', costs: { '100000': 13, '300000': 70, '1000000': 367, '3000000': 2400, '10000000': null } },
+    ],
+  });
+  assert.match(html, /金額別の実効コスト/);
+  assert.match(html, /cell--best/);
+  // 板が足りない段は数字を出さず、そう書く
+  assert.match(html, /板不足/);
+  // 「板の一番上だけ」の表と混ざらないよう見出しを分ける
+  assert.match(html, /板の一番上だけを見た場合/);
+});
+
+test('renderPairPage: 金額で最安が入れ替わるならそう書く', () => {
+  const html = pairPage({
+    depth: [
+      { venue: 'gmo', costs: { '100000': 100, '300000': 100, '1000000': 100, '3000000': 100, '10000000': 1 } },
+      { venue: 'bitbank', costs: { '100000': 1, '300000': 1, '1000000': 1, '3000000': 1, '10000000': 100 } },
+    ],
+  });
+  assert.match(html, /金額によって答えが変わります/);
+});
+
+test('renderPairPage: どの金額でも同じ取引所が最安ならそう書く', () => {
+  const html = pairPage({
+    depth: [
+      { venue: 'gmo', costs: { '100000': 100, '300000': 100, '1000000': 100, '3000000': 100, '10000000': 100 } },
+      { venue: 'bitbank', costs: { '100000': 1, '300000': 1, '1000000': 1, '3000000': 1, '10000000': 1 } },
+    ],
+  });
+  assert.match(html, /どの金額でもbitbankがいちばん安く済みます/);
+});
+
+test('renderPairPage: 板の観測がまだ無いときは、その旨だけ出す', () => {
+  const html = pairPage({ depth: [] });
+  assert.match(html, /まだ板を観測できていません/);
+  assert.doesNotMatch(html, /cell--best/);
 });

@@ -13,6 +13,7 @@
  * ここだけなので、日付の前後リンクを必ず置いてクロールの導線を切らさない。
  */
 import { costFromBps, type Ranked } from './spread.ts';
+import { AMOUNT_LADDER } from './depth.ts';
 import { DEFAULT_LOCALE, LOCALES, otherLocale, pairName, t, type Locale } from './i18n.ts';
 import { PAIRS, type Pair, type PairId } from './pairs.ts';
 import { VENUE_LABEL } from './venues.ts';
@@ -201,6 +202,8 @@ export type PairPageData = {
   observedAt: number | null;
   now: number;
   recentDays: string[];
+  /** 取引所ごとの、金額別の実効コスト。取れていない段は null。 */
+  depth: { venue: string; costs: Record<string, number | null> }[];
 };
 
 export function renderPairPage(data: PairPageData): string {
@@ -237,7 +240,11 @@ export function renderPairPage(data: PairPageData): string {
     body: `${header(locale, meta, homePath(locale))}
 <main data-pair="${esc(pair.id)}">
   ${stale ? `<p class="notice">${esc(messages.staleNotice(Math.floor((now - (observedAt as number)) / 60), formatTime(observedAt as number, locale)))}</p>` : ''}
-  <section class="lede">
+
+  ${renderDepth(locale, data.depth)}
+
+  <section class="section">
+    <h2 class="section__title">${esc(messages.bestQuoteTitle)}</h2>
     <form class="amount" method="get" action="${esc(pairPath(locale, pair.id))}" data-pair="${esc(pair.id)}">
       <label for="amount">${esc(messages.amountLabel)}</label>
       <input id="amount" name="amount" type="text" inputmode="numeric" value="${amountYen.toLocaleString('ja-JP')}" autocomplete="off">
@@ -245,9 +252,9 @@ export function renderPairPage(data: PairPageData): string {
       <button type="submit">${esc(messages.calculate)}</button>
     </form>
     <p class="lede__text">${esc(messages.lede(name))}</p>
+    ${ranked.length === 0 ? `<p class="empty">${esc(messages.noDataYet)}</p>` : renderRanking(locale, ranked, gapYen)}
+    <p class="rank__note">${esc(messages.bestQuoteNote)}</p>
   </section>
-
-  ${ranked.length === 0 ? `<section class="section"><p class="empty">${esc(messages.noDataYet)}</p></section>` : renderRanking(locale, ranked, gapYen)}
 
   <section class="section">
     <h2 class="section__title">${esc(messages.chartTitle)}</h2>
@@ -278,6 +285,73 @@ export function renderPairPage(data: PairPageData): string {
   </section>
 </main>`,
   });
+}
+
+/**
+ * 金額別の実効コスト。このサイトでいちばん判断に効く表。
+ *
+ * 板の一番上の値段だけを見ていると、金額が変わってもコストは比例するように見える。
+ * 実際は板の厚みが取引所ごとに違うので、金額によっていちばん安い取引所が入れ替わる。
+ * 行を金額、列を取引所にして、各行の最小値を強調する。
+ */
+function renderDepth(
+  locale: Locale,
+  depth: { venue: string; costs: Record<string, number | null> }[],
+): string {
+  const messages = t(locale);
+  if (depth.length === 0) {
+    return `<section class="section">
+    <h2 class="section__title">${esc(messages.depthTitle)}</h2>
+    <p class="empty">${esc(messages.depthNone)}</p>
+  </section>`;
+  }
+
+  const venues = depth.map((row) => row.venue);
+  const head = venues
+    .map((venue) => `<th scope="col" class="num">${esc(VENUE_LABEL[venue] ?? venue)}</th>`)
+    .join('');
+
+  const cheapestAt: Record<number, string | null> = {};
+  const rows = AMOUNT_LADDER.map((amount) => {
+    const key = String(amount);
+    const values = depth.map((row) => ({ venue: row.venue, cost: row.costs[key] ?? null }));
+    const available = values.filter((v) => v.cost !== null) as { venue: string; cost: number }[];
+    const best = available.length > 0 ? Math.min(...available.map((v) => v.cost)) : null;
+    cheapestAt[amount] = available.find((v) => v.cost === best)?.venue ?? null;
+
+    const cells = values
+      .map((v) =>
+        v.cost === null
+          ? `<td class="num muted">${esc(messages.depthNotEnough)}</td>`
+          : `<td class="num${v.cost === best ? ' cell--best' : ''}">${esc(formatYen(v.cost))}</td>`,
+      )
+      .join('');
+    return `<tr><th scope="row" class="num">${esc(formatYen(amount))}</th>${cells}</tr>`;
+  }).join('\n');
+
+  const smallest = cheapestAt[AMOUNT_LADDER[0] as number] ?? null;
+  const largest = cheapestAt[AMOUNT_LADDER.at(-1) as number] ?? null;
+  const insight =
+    smallest && largest
+      ? smallest === largest
+        ? messages.depthSameVenue(VENUE_LABEL[smallest] ?? smallest)
+        : messages.depthInsight(
+            VENUE_LABEL[smallest] ?? smallest,
+            VENUE_LABEL[largest] ?? largest,
+          )
+      : '';
+
+  return `<section class="section">
+    <h2 class="section__title">${esc(messages.depthTitle)}</h2>
+    <p class="lede__text">${esc(messages.depthLede)}</p>
+    <div class="table-wrap"><table class="table table--matrix">
+      <thead><tr><th scope="col" class="num">${esc(messages.depthAmount)}</th>${head}</tr></thead>
+      <tbody>
+        ${rows}
+      </tbody>
+    </table></div>
+    ${insight ? `<p class="rank__note">${esc(insight)}</p>` : ''}
+  </section>`;
 }
 
 function renderRanking(locale: Locale, ranked: Ranked[], gapYen: number): string {

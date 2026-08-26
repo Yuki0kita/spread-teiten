@@ -31,16 +31,19 @@ import {
   renderPairPage,
 } from './render.ts';
 import { VENUE_IDS, VENUE_LABEL } from './venues.ts';
+import { parseLadder } from './depth.ts';
 import { bearerToken, collectOnce, tokenMatches } from './collect.ts';
 import {
   bucketsSince,
   dailyFor,
   daysWithData,
+  latestDepth,
   latestTicks,
   recentDaily,
   recentErrors,
   type BucketRow,
   type DailyRow,
+  type DepthRow,
   type Tick,
 } from './store.ts';
 
@@ -53,7 +56,7 @@ type Bindings = {
 };
 
 /** CSSとJSのキャッシュを確実に切り替えるための版。変更したら上げる。 */
-const ASSET_VERSION = '8';
+const ASSET_VERSION = '10';
 
 const DEFAULT_HISTORY_HOURS = 24;
 const MAX_HISTORY_HOURS = 24 * 14;
@@ -130,6 +133,7 @@ app.get('/:locale{(ja|en)}/:pair/', async (c) => {
   const amountYen = clampAmount(c.req.query('amount'));
   const ticks = await readLatest(c, pair.id, now);
   const recentDays = (await readDays(c, pair.id, now)).slice(0, RECENT_DAYS_ON_PAGE);
+  const depthRows = await readDepth(c, pair.id, now);
 
   return html(
     c,
@@ -144,6 +148,7 @@ app.get('/:locale{(ja|en)}/:pair/', async (c) => {
       observedAt: ticks.length > 0 ? Math.max(...ticks.map((t) => t.ts)) : null,
       now,
       recentDays,
+      depth: depthRows.map((row) => ({ venue: row.venue, costs: parseLadder(row.costs) })),
     }),
   );
 });
@@ -372,6 +377,20 @@ function readLatest(
     waitUntil(c),
     LATEST_TTL_SECONDS,
     () => latestTicks(c.env.DB, pair, VENUE_IDS),
+  );
+}
+
+/** 板から出した実効コスト。銘柄を回して取っているので更新は数分おきになる。 */
+function readDepth(
+  c: Context<{ Bindings: Bindings }>,
+  pair: PairId,
+  now: number,
+): Promise<DepthRow[]> {
+  return cachedRead<DepthRow[]>(
+    versionedKey(`depth:${pair}`, now, LATEST_TTL_SECONDS),
+    waitUntil(c),
+    LATEST_TTL_SECONDS,
+    () => latestDepth(c.env.DB, pair, VENUE_IDS),
   );
 }
 

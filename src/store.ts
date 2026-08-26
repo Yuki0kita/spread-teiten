@@ -11,6 +11,8 @@ import { BUCKET_SECONDS, bucketOf, jstDay, spreadBps, TICK_RETENTION_DAYS } from
 import type { Quote } from './spread.ts';
 import type { PairId } from './pairs.ts';
 
+export type DepthRow = { venue: string; ts: number; costs: string };
+
 export type Tick = Quote & { ts: number };
 
 export type BucketRow = {
@@ -155,6 +157,39 @@ export async function insertErrors(
   await db.batch(errors.map((e) => statement.bind(pair, ts, e.venue, e.message.slice(0, 200))));
 }
 
+/** 実効コストを保存する。同じ分に二度呼ばれても行は増えない。 */
+export async function insertDepth(
+  db: D1Database,
+  pair: PairId,
+  ts: number,
+  rows: { venue: string; costs: string }[],
+): Promise<void> {
+  if (rows.length === 0) return;
+  const statement = db.prepare(
+    'INSERT OR REPLACE INTO depth (pair, ts, venue, costs) VALUES (?1, ?2, ?3, ?4)',
+  );
+  await db.batch(rows.map((r) => statement.bind(pair, ts, r.venue, r.costs)));
+}
+
+/**
+ * 取引所ごとの最新の実効コスト。
+ *
+ * 板は銘柄を回しながら取っているので、最新の時刻は取引所ごとに揃っている
+ * （同じ回で4社ぶんまとめて入る）。最新の1行ずつを引けばよい。
+ */
+export async function latestDepth(
+  db: D1Database,
+  pair: PairId,
+  venues: readonly string[],
+): Promise<DepthRow[]> {
+  if (venues.length === 0) return [];
+  const statement = db.prepare(
+    'SELECT venue, ts, costs FROM depth WHERE pair = ?1 AND venue = ?2 ORDER BY ts DESC LIMIT 1',
+  );
+  const responses = await db.batch<DepthRow>(venues.map((venue) => statement.bind(pair, venue)));
+  return responses.flatMap((response) => response.results ?? []);
+}
+
 /** その分ぶんが既に記録されているか。無駄な取得を止めるために使う。 */
 export async function hasTicksAt(db: D1Database, pair: PairId, ts: number): Promise<boolean> {
   const row = await db
@@ -251,6 +286,7 @@ export async function pruneTicks(db: D1Database, now: number): Promise<void> {
   await db.batch([
     db.prepare('DELETE FROM ticks WHERE ts < ?1').bind(cutoff),
     db.prepare('DELETE FROM fetch_errors WHERE ts < ?1').bind(cutoff),
+    db.prepare('DELETE FROM depth WHERE ts < ?1').bind(cutoff),
   ]);
 }
 
