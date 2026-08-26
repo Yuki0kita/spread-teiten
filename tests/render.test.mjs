@@ -335,3 +335,11 @@ test('スパークライン: 値が全部同じでも壊れない', () => {
 test('監視画面: 銘柄ページへの導線がある', () => {
   assert.match(watch([pulseRow('gmo', 1, 'calm')]), /\/ja\/btc\//);
 });
+
+
+test('Search Consoleの確認タグが全ページに出る', () => {
+  const tag = /name="google-site-verification" content="[A-Za-z0-9_-]{20,}"/;
+  assert.match(pairPage(), tag);
+  assert.match(watch([pulseRow('gmo', 1, 'calm')]), tag);
+  assert.match(renderNotFound('ja', 'https://example.com', '1', 404), tag);
+});

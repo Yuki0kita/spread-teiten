@@ -120,3 +120,11 @@ curl -X POST -H "Authorization: Bearer $(cat .collect-token)" \
 ```
 
 `.collect-token` はコミットしない（`.gitignore` 済み）。
+
+## デプロイの手順
+
+**必ず `npm run deploy` を使う。** `npx wrangler deploy` を直接叩かない。
+`predeploy` で typecheck とテストが走り、落ちればデプロイされない。
+
+テスト結果を `grep` に通すと、失敗していても grep の終了コード0が返り、
+`&&` でつないだデプロイが走ってしまう。実際にそれで本番を500にしたことがある。

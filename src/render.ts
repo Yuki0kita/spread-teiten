@@ -20,6 +20,17 @@ import { type Pair, type PairId } from './pairs.ts';
 import { VENUE_LABEL } from './venues.ts';
 import type { DailyRow } from './store.ts';
 
+/**
+ * Search Consoleの所有権確認。HTMLに出す前提のトークンなので秘密ではない。
+ * プロパティは https://spread-teiten.teiten.workers.dev/ のURLプレフィックス。
+ */
+const GOOGLE_SITE_VERIFICATION = 'JcmMDWn3pVkD6EJ1Q8eT8UohYHox53-d_dl0ckfMM8U';
+
+/** 所有権確認のタグ。リダイレクトの本文にも入れるので関数にしてある。 */
+export function verificationTag(): string {
+  return `<meta name="google-site-verification" content="${esc(GOOGLE_SITE_VERIFICATION)}">`;
+}
+
 export const DEFAULT_AMOUNT_YEN = 100_000;
 export const MIN_AMOUNT_YEN = 1_000;
 export const MAX_AMOUNT_YEN = 100_000_000;
@@ -85,6 +96,7 @@ function layout(options: LayoutOptions): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
+${verificationTag()}
 ${options.noindex ? '<meta name="robots" content="noindex">' : ''}
 <title>${esc(options.title)}</title>
 <meta name="description" content="${esc(options.description)}">

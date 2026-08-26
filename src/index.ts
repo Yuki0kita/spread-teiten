@@ -22,6 +22,7 @@ import { DEFAULT_LOCALE, isLocale, localeFromHeader, LOCALES, type Locale } from
 import { DEFAULT_PAIR, findPair, PAIRS, PAIR_IDS, type PairId } from './pairs.ts';
 import {
   clampAmount,
+  verificationTag,
   dayPath,
   homePath,
   pairPath,
@@ -111,8 +112,20 @@ app.use('*', async (c, next) => {
   );
 });
 
-/** 言語なしで来たら、ブラウザの設定を見て振り分ける。 */
-app.get('/', (c) => c.redirect(homePath(localeFromHeader(c.req.header('Accept-Language'))), 302));
+/**
+ * 言語なしで来たら、ブラウザの設定を見て振り分ける。
+ *
+ * 本文にも所有権確認のタグを入れてある。Search Consoleに登録したURLはここで、
+ * ブラウザは本文を読まずにリダイレクトするだけだが、
+ * 確認する側がリダイレクトを辿らずに本文を読む場合に一度で通るようにするため。
+ */
+app.get('/', (c) => {
+  const to = homePath(localeFromHeader(c.req.header('Accept-Language')));
+  return c.html(redirectBody(to), 302, {
+    Location: to,
+    'Cache-Control': 'public, max-age=300',
+  });
+});
 
 /* 画面 --------------------------------------------------------------- */
 
@@ -547,6 +560,11 @@ function clampHours(raw: string | undefined): number {
 function round(value: number, digits: number): number {
   const factor = 10 ** digits;
   return Math.round(value * factor) / factor;
+}
+
+/** リダイレクト時の最小の本文。所有権確認のタグと、辿れなかった人向けのリンクだけ。 */
+function redirectBody(to: string): string {
+  return `<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8">${verificationTag()}<title>スプレッド定点</title></head><body><a href="${to}">スプレッド定点</a></body></html>`;
 }
 
 function html(c: Context<{ Bindings: Bindings }>, body: string): Response {
